@@ -25,7 +25,7 @@ quarto render
 
 Datasets (ACTG 175, BCG vaccine trials) load at render time from the `speff2trial` and `metadat` CRAN packages; no data files are stored here. A full render takes several minutes due to the permutation and operating-characteristic simulations. Seeds are fixed in the source, so all reported numbers reproduce exactly.
 
-The signed declaration of originality is part of the official submission only and is not distributed; `98_declaration.qmd` is omitted here, so comment out that chapter in `_quarto.yml` if rendering from a clone.
+The signed declaration of originality is part of the official submission only and is not distributed. The template inserts it via \includepdf{confirmation-originality-scan.pdf} at the end of latex/my-template.tex; to render from a clone, delete that \includepdf block or place any one-page PDF with that filename in the project root.
 
 ## License
 
