@@ -1,0 +1,16 @@
+# Abstract {.unnumbered}
+
+Modern research often involves interim monitoring, data-dependent stopping, follow-up studies, and multiple testing. E-values provide a framework for quantifying evidence while retaining rigorous error guarantees when the timing or continuation of an analysis depends on the observed data. This thesis presents a practical guide to e-values and safe testing, connecting their mathematical foundations to implementation and applied analysis.
+
+Starting from the defining expectation bound, the thesis explains the likelihood-ratio and betting interpretations of e-values, their connection to hypothesis testing through Markov’s inequality, and their sequential extension through conditional e-variables, test supermartingales, and Ville’s inequality. Confidence sequences provide the corresponding framework for anytime-valid estimation, while the e-Benjamini--Hochberg procedure (eBH) and the e-Partitioning Principle extend the approach to multiple testing.
+
+The methods are illustrated in R, primarily through the safestats package, using safe versions of the z-test, t-test, two-proportions test, and logrank test alongside classical procedures. A case study based on ACTG 175 demonstrates fixed-horizon analysis, sequential monitoring, and multiple treatment comparisons. An analysis of the BCG vaccine studies illustrates the accumulation of evidence across separate studies, and simulations examine type-I error, power, and stopping behaviour. Throughout, the safe procedures are compared with their classical counterparts on the same data and designs.
+
+By combining theory, software, simulation, and real-data applications, the thesis provides an accessible route into e-value methods and shows how they can support flexible statistical analyses while maintaining transparent error guarantees under the assumptions of the chosen construction.
+
+```{=latex}
+\clearpage
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+```

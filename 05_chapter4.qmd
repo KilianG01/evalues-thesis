@@ -1,0 +1,995 @@
+# Multiple Testing with E-Values {#sec-multiple-testing}
+
+```{r}
+#| label: setup-ch5
+#| include: false
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+set.seed(2026)
+
+if (!requireNamespace("MASS", quietly = TRUE)) {
+  stop("The MASS package is required for the eBH+ simulation.")
+}
+```
+
+
+The previous chapters considered one hypothesis at a time. @sec-safe-tests constructed e-values for classical testing problems, and the sequential machinery of @def-eprocess, together with Ville's inequality (@thm-ville), showed that e-processes may be monitored and stopped without losing their null validity. This chapter asks what happens when many such hypotheses are tested together.
+
+Let
+$$
+H_1,\ldots,H_m
+$$
+be a family of null hypotheses, and write $[m]=\{1,\ldots,m\}$. A multiple-testing procedure returns a random rejection set
+$$
+R \subseteq [m],
+$$
+where $i \in R$ means that $H_i$ is rejected. For a data-generating distribution $P$, define the set of true null hypotheses as
+$$
+N_P = \{i \in [m] : P \in H_i\},
+$$
+so that the false discoveries are the rejected true nulls, $R \cap N_P$.
+
+The classical family-wise error rate controls the probability of making at least one false rejection. In many scientific settings this is too stringent. When testing many endpoints, biomarkers, or subgroups, the more relevant question is often what fraction of the reported discoveries is false on average. Controlling that quantity, rather than the probability of any false rejection, is the goal of the false discovery rate.
+
+::: {#def-fdp-fdr}
+## False discovery proportion and false discovery rate [adapted from @benjamini1995bh; @xu2025closure, Table 3]
+
+For a rejection set $R \subseteq [m]$, the **false discovery proportion** under $P$ is
+$$
+  \mathrm{FDP}_P(R) = \frac{|R \cap N_P|}{|R| \vee 1},
+$$
+where $a \vee b = \max(a,b)$, so the denominator $|R| \vee 1$ enforces the convention $\mathrm{FDP}_P(\emptyset) = 0$. The **false discovery rate** is its expectation,
+$$
+  \mathrm{FDR}_P(R) = \mathbb{E}_P[\mathrm{FDP}_P(R)].
+$$
+A procedure controls FDR at level $\alpha$ if $\mathrm{FDR}_P(R) \le \alpha$ for every $P$ in the model.
+:::
+
+Suppose that for each $H_i$ we have a valid e-value $E_i$, meaning that
+$$
+\mathbb{E}_P[E_i] \leq 1
+\qquad
+\text{whenever } P \in H_i.
+$$
+The $E_i$'s may come from the safe tests of @sec-safe-tests, or from stopped e-processes as in the previous chapter. In particular, if $E_{i,t}$ is an e-process for $H_i$ and $\tau_i$ is a stopping time with respect to the filtration for which that e-process is valid, then $E_{i,\tau_i}$ is itself a valid e-value for $H_i$ (@def-eprocess). These stopped e-values can therefore be passed to an FDR procedure. If stopping depends jointly on information from several hypothesis streams, however, the processes must be valid in the corresponding shared global filtration; validity only in separate local filtrations is not sufficient [@wang2025stoppedeBH]. This is the main bridge from anytime-valid inference to multiple testing.
+
+This chapter focuses on FDR control with e-values. @sec-ebh introduces the eBH procedure of @wang2022fdr, the e-value counterpart of the Benjamini--Hochberg procedure of @benjamini1995bh. @sec-e-partitioning then presents the FDR-specialised partitioning formulation of the e-Closure Principle developed in @xu2025closure. The terms "e-Partitioning", "eBH+", "BY+", and "Su+" are retained from the earlier preprint @goeman2025epartitioning for continuity with the derivations and simulation below; the merged paper calls the general framework e-Closure and presents corresponding closed or simultaneous versions of eBH, BY, and Su.
+
+
+## The eBH procedure {#sec-ebh}
+
+The eBH procedure of @wang2022fdr is the e-value analogue of the Benjamini--Hochberg step-up procedure, obtained by running Benjamini--Hochberg on the reciprocals $1/E_1, \ldots, 1/E_m$. Its input is a vector
+$$
+E_1,\ldots,E_m
+$$
+of valid e-values, where $E_i$ is valid for $H_i$.
+
+Let $i_{[1]},\ldots,i_{[m]}$ be an ordering of the hypotheses such that
+$$
+E_{[1]} \geq E_{[2]} \geq \cdots \geq E_{[m]},
+$$
+where $E_{[k]} = E_{i_{[k]}}$. For a target FDR level $\alpha \in (0,1)$, define
+$$
+\hat k
+=
+\max
+\left\{
+k \in \{1,\ldots,m\} :
+E_{[k]} \geq \frac{m}{\alpha k}
+\right\},
+$$
+with the convention that $\hat k = 0$ if the set is empty. The eBH rejection set is the set of the $\hat k$ hypotheses with the largest e-values,
+$$
+R_{\mathrm{eBH}}
+=
+\begin{cases}
+\{i_{[1]},\ldots,i_{[\hat k]}\},
+& \hat k \geq 1,\\
+\emptyset,
+& \hat k = 0.
+\end{cases}
+$$
+Ties can be broken in any deterministic way. The R implementation below uses the original order of the hypotheses as the tie-breaker.
+
+The eBH rejection set has a key self-consistency property. Whenever $i \in R_{\mathrm{eBH}}$, its e-value is at least the threshold evaluated at the size of the rejection set,
+$$
+E_i
+\geq
+\frac{m}{\alpha |R_{\mathrm{eBH}}|}.
+$$
+To see this, recall that $|R_{\mathrm{eBH}}| = \hat k$. Any rejected index $i$ is one of the top $\hat k$, so its e-value is at least the $\hat k$-th largest, $E_i \geq E_{[\hat k]}$. By the definition of $\hat k$, the $\hat k$-th largest e-value clears its own threshold, $E_{[\hat k]} \geq m/(\alpha \hat k)$, and $\hat k = |R_{\mathrm{eBH}}|$ gives the stated bound.
+
+It is convenient to rewrite this bound so that it holds for every index $i$, not only the rejected ones,
+$$
+\frac{\mathbf{1}\{i \in R_{\mathrm{eBH}}\}}{|R_{\mathrm{eBH}}| \vee 1}
+\leq
+\frac{\alpha}{m} E_i .
+$$
+For a rejected index $i \in R_{\mathrm{eBH}}$ the left-hand side equals $1/|R_{\mathrm{eBH}}|$, and rearranging the self-consistency bound above gives exactly this inequality. For an index $i \notin R_{\mathrm{eBH}}$ the left-hand side is zero while the right-hand side is non-negative, so the inequality holds automatically. The value of this version is that it can be summed over any set of indices, which is precisely what the FDR proof uses. Summing it over $i \in N_P$ and taking expectations turns self-consistency into the bound $\mathrm{FDR}_P(R_{\mathrm{eBH}}) \le \alpha$, with no assumption on the joint distribution of $(E_1,\ldots,E_m)$, as shown next.
+
+::: {#exm-ebh-walkthrough}
+## eBH on a small input
+
+Take $m = 10$ and $\alpha = 0.05$, and suppose the e-values are
+$$
+(E_1,\ldots,E_{10}) = (0.4,\; 220,\; 1.1,\; 95,\; 0.8,\; 60,\; 0.6,\; 55,\; 45,\; 0.9).
+$$
+Sorting in decreasing order gives the $E_{[k]}$ shown in @tbl-ebh-walkthrough, alongside the threshold $m/(\alpha k) = 200/k$, which is $200$ at rank $1$ and decreases to $20$ at rank $10$.
+
+| $k$ | $E_{[k]}$ | $200/k$ | $E_{[k]} \geq 200/k$ |
+|---:|---:|---:|:---:|
+| 1 | 220  | 200.0 | yes |
+| 2 | 95   | 100.0 | no  |
+| 3 | 60   |  66.7 | no  |
+| 4 | 55   |  50.0 | yes |
+| 5 | 45   |  40.0 | yes |
+| 6 | 1.1  |  33.3 | no  |
+
+: eBH walkthrough at $m=10$, $\alpha = 0.05$. Ranks $7$ to $10$ all have $E_{[k]} < 1$ and are omitted. {#tbl-ebh-walkthrough}
+
+The largest $k$ at which $E_{[k]} \geq 200/k$ is $\hat k = 5$, so eBH rejects the indices behind the five largest e-values, $R_{\mathrm{eBH}} = \{2, 4, 6, 8, 9\}$.
+
+Note that $\hat k$ is the *last* crossing, not the first. The e-values at ranks two and three fail their own positional thresholds, but are still rejected because the cohort of size five clears the cohort-size-five threshold of $40$. Self-consistency holds at $|R_{\mathrm{eBH}}| = 5$ even though some rejected hypotheses would not have cleared the bar in isolation. The procedure also remains conservative when only one or two e-values are very large. A value of $95$ would not suffice as the second of only two discoveries, but it is rejected here because the five-hypothesis cohort clears the rank-five threshold of $40$.
+:::
+
+
+::: {#prp-ebh-fdr}
+## FDR control of eBH [@wang2022fdr]
+Suppose that $E_i$ is a valid e-value for $H_i$, for each $i \in \{1,\ldots,m\}$. Then the eBH procedure controls FDR at level $\alpha$:
+$$
+\operatorname{FDR}_P(R_{\mathrm{eBH}}) \leq \alpha
+$$
+for all data-generating distributions $P$, under arbitrary dependence among the e-values.
+:::
+
+::: {.proof}
+The argument follows @wang2022fdr. Fix a data-generating distribution $P$ and let $N_P$ be its set of true nulls. The false discoveries are the rejected true nulls, and their number is a sum of indicators,
+$$
+|R_{\mathrm{eBH}} \cap N_P| = \sum_{i \in N_P} \mathbf{1}\{i \in R_{\mathrm{eBH}}\}.
+$$
+Dividing by $|R_{\mathrm{eBH}}| \vee 1$ and taking the expectation gives the false discovery rate,
+$$
+\operatorname{FDR}_P(R_{\mathrm{eBH}})
+=
+\mathbb{E}_P\left[
+\sum_{i \in N_P}
+\frac{\mathbf{1}\{i \in R_{\mathrm{eBH}}\}}{|R_{\mathrm{eBH}}| \vee 1}
+\right].
+$$
+Now apply the rearranged self-consistency bound to each summand. For every $i$,
+$$
+\frac{\mathbf{1}\{i \in R_{\mathrm{eBH}}\}}{|R_{\mathrm{eBH}}| \vee 1}
+\leq
+\frac{\alpha}{m} E_i ,
+$$
+so, summing over $i \in N_P$ and using linearity of expectation,
+$$
+\operatorname{FDR}_P(R_{\mathrm{eBH}})
+\leq
+\frac{\alpha}{m}
+\sum_{i \in N_P}
+\mathbb{E}_P[E_i] .
+$$
+Each $i \in N_P$ is a true null, so $\mathbb{E}_P[E_i] \leq 1$, and there are $|N_P| \leq m$ such terms. Therefore
+$$
+\operatorname{FDR}_P(R_{\mathrm{eBH}})
+\leq
+\frac{\alpha}{m} \cdot |N_P|
+\leq
+\alpha .
+$$
+The only property of the e-values used is the per-hypothesis bound $\mathbb{E}_P[E_i] \leq 1$ on the nulls, so the guarantee holds for any joint distribution of $(E_1,\ldots,E_m)$, that is, under arbitrary dependence.
+:::
+
+In R, the procedure can be implemented directly from the definition. The function returns a logical vector in the original order of the hypotheses.
+
+```{r}
+#| label: code-ebh-function
+
+e_bh <- function(e, alpha = 0.05) {
+  stopifnot(is.numeric(e), all(e >= 0), alpha > 0, alpha < 1)
+  m <- length(e)
+  ord <- order(-e, seq_along(e))
+  e_ord <- e[ord]
+  k <- seq_len(m)
+  eligible <- which(e_ord >= m / (alpha * k))
+  k_hat <- if (length(eligible) == 0L) 0L else max(eligible)
+  reject <- rep(FALSE, m)
+  if (k_hat > 0L) {
+    reject[ord[seq_len(k_hat)]] <- TRUE
+  }
+  reject
+}
+```
+
+Applied to the input from @exm-ebh-walkthrough, the function reproduces $R_{\mathrm{eBH}} = \{2, 4, 6, 8, 9\}$.
+
+```{r}
+#| label: check-ebh-function
+
+e_bh(c(0.4, 220, 1.1, 95, 0.8, 60, 0.6, 55, 45, 0.9), alpha = 0.05)
+```
+
+**Comparison with the BH procedure.** The relationship between BH and eBH is exact after a reciprocal transformation. Define
+$$
+\widetilde P_i = \frac{1}{E_i},
+$$
+with the convention $1/0 = \infty$. By @prp-markov, $\widetilde P_i$ is a p-variable for $H_i$. Because reciprocation reverses the ordering,
+$$
+E_{[1]} \geq \cdots \geq E_{[m]}
+\qquad\Longleftrightarrow\qquad
+\widetilde P_{(1)} \leq \cdots \leq \widetilde P_{(m)},
+$$
+and the two rank-wise criteria are equivalent:
+$$
+E_{[k]} \geq \frac{m}{\alpha k}
+\qquad\Longleftrightarrow\qquad
+\widetilde P_{(k)} \leq \frac{\alpha k}{m}.
+$$
+Thus, with the same deterministic tie-breaking, eBH returns exactly the rejection set obtained by applying the classical BH step-up rule of @benjamini1995bh to the reciprocal p-variables $\widetilde P_1, \ldots, \widetilde P_m$.
+
+This algorithmic identity does not mean that the usual BH guarantee extends to arbitrary p-values under arbitrary dependence. Reciprocal p-variables obtained from e-values satisfy the stronger condition
+$$
+\mathbb{E}_P\!\left[\frac{1}{\widetilde P_i}\right]
+=
+\mathbb{E}_P[E_i]
+\leq 1
+\qquad
+\text{whenever } P \in H_i .
+$$
+This is much stronger than p-variable validity alone. A uniform p-variable $U$ is exactly valid, but $\mathbb{E}[1/U] = \infty$. The proof of @prp-ebh-fdr uses precisely the stronger expectation bound: self-consistency bounds each false-discovery term by $\alpha E_i / m$, after which the null expectations can be summed without any assumption on the joint dependence of the e-values.
+
+For general p-values, the ordinary BH thresholds are valid under independence and under suitable positive-dependence conditions such as the positive regression dependence on a subset (PRDS) condition of @benjamini2001by, a form of positive dependence under which a small p-value at one hypothesis makes small p-values at the others no less likely, but they are not guaranteed under arbitrary dependence. One standard dependence-robust modification is the harmonic correction used by the BY procedure, revisited in @sec-beyond-ebh-plus. The arbitrary-dependence guarantee of eBH therefore comes from the stronger expectation constraint on its reciprocal p-variables, not from a different step-up rule.
+
+## The e-Partitioning Principle {#sec-e-partitioning}
+
+The eBH procedure controls the FDR of one selected rejection set. A more flexible target is to control the expected worst-case false discovery proportion over a *collection* $\mathcal{R}$ of possible rejection sets:
+$$
+\mathbb{E}_P\left[
+\max_{R \in \mathcal{R}}
+\frac{|R \cap N_P|}{|R| \vee 1}
+\right] \leq \alpha .
+$$
+We assume that $\mathcal{R}$ is non-empty. This entails no loss of generality because adjoining $\emptyset$ does not increase the maximum FDP.
+
+This is the *simultaneous FDR* criterion [@xu2025closure]. The maximum inside the expectation is the worst false discovery proportion among all the sets the analyst might end up reporting, so bounding its expectation controls the FDR of every set in $\mathcal{R}$ at once. This is what makes the criterion useful in practice. With ordinary FDR control, a pre-specified procedure returns one data-dependent rejection set. Under simultaneous FDR control, a pre-specified procedure returns a data-dependent collection of admissible rejection sets, and after inspecting the data the analyst may choose a member of the realised collection, with the guarantee still applying to the selected set. If $\mathcal{R}$ contains only one set, the criterion reduces to the usual FDR criterion from @def-fdp-fdr.
+
+To control this worst-case quantity, it helps to notice what the false discovery proportion really depends on. For a fixed rejection set $R$, the FDP $|R \cap N_P|/(|R| \vee 1)$ depends on the unknown distribution $P$ only through the set of true nulls $N_P$. If we knew $N_P$, we would know the FDP of every $R$ exactly. This suggests organising the analysis around the possible values of $N_P$ rather than around the individual hypotheses.
+
+For each subset $S \subseteq [m]$, define the partitioning hypothesis
+$$
+H_S = \{P : N_P = S\}.
+$$
+Thus, $H_S$ is the hypothesis that the set of true nulls is exactly $S$. This is a different kind of hypothesis from the individual $H_i$. Note that @xu2025closure reserve $H_S$ for the intersection hypothesis $\bigcap_{i \in S} H_i$ and write $\bar H_S$ for the partitioning hypothesis used here. This chapter retains $H_S$ for the partitioning hypothesis throughout. Whereas $H_i$ asks only whether hypothesis $i$ is null and says nothing about the others, $H_S$ pins down the entire null configuration at once. These hypotheses partition the model, meaning that they are mutually exclusive and exhaustive. Every $P$ belongs to exactly one $H_S$, namely the one with $S = N_P$, so exactly one of them is true even though we do not know which.
+
+The case $S = \emptyset$ does not require a partitioning e-value in the suite. If $N_P = \emptyset$, no false discoveries are possible for any $R$, and the constraint defining $\mathcal{R}_\alpha(\mathbf{E})$ below is automatically satisfied. A suite of partitioning e-values is a collection
+$$
+\mathbf{E} = (e_S)_{S \subseteq [m],\, S \neq \emptyset},
+$$
+where bold $\mathbf{E}$ distinguishes a suite of e-values, indexed by subsets, from a single e-value $E_i$. There is one e-value $e_S$ for each candidate configuration $S$, and $e_S$ measures the evidence against the claim that the true-null set is exactly $S$. Each $e_S$ is an e-value for $H_S$, meaning that $e_S \geq 0$ and
+$$
+\mathbb{E}_P[e_S] \leq 1
+\quad
+\text{for all } P \in H_S.
+$$
+There are $2^m - 1$ non-empty subsets, so a suite contains exponentially many e-values. This is harmless for the theory but matters for computation, and @sec-ebh-plus-simulation returns to it.
+Given such a suite, define the e-Partitioning procedure
+$$
+\mathcal{R}_\alpha(\mathbf{E})
+=
+\left\{
+R \subseteq [m] :
+\frac{|R \cap S|}{|R| \vee 1}
+\leq
+\alpha e_S
+\text{ for all non-empty } S \subseteq [m]
+\right\}.
+$$
+To read this definition, interpret $|R \cap S|/(|R| \vee 1)$ as the false discovery proportion that $R$ *would* have if $S$ were the true-null set, since $R \cap S$ would then be the false discoveries. A candidate $R$ is admissible only if the corresponding inequality holds for every non-empty $S \subseteq [m]$. For a fixed data-generating distribution $P$, the proof below uses the single relevant constraint $S = N_P$.
+
+A small example makes the constraint concrete. Take $m = 2$, so the non-empty subsets are $\{1\}$, $\{2\}$, and $\{1,2\}$, and consider the candidate $R = \{1\}$. The three inequalities that $R$ must satisfy are
+$$
+\frac{|\{1\} \cap \{1\}|}{1} = 1 \leq \alpha e_{\{1\}},
+\qquad
+\frac{|\{1\} \cap \{2\}|}{1} = 0 \leq \alpha e_{\{2\}},
+\qquad
+\frac{|\{1\} \cap \{1,2\}|}{1} = 1 \leq \alpha e_{\{1,2\}} .
+$$
+The middle inequality holds automatically, since index $1$ cannot be a false discovery when the true-null set is $\{2\}$. The set $\{1\}$ is therefore admissible exactly when $e_{\{1\}} \geq 1/\alpha$ and $e_{\{1,2\}} \geq 1/\alpha$, that is, when there is sufficient evidence against both configurations in which index $1$ is null.
+
+::: {#prp-e-partitioning}
+## The e-Partitioning Principle [adapted from @xu2025closure, Theorem 14]
+A random collection $\mathcal{R} \subseteq 2^{[m]}$ (a data-dependent family of candidate rejection sets) controls simultaneous FDR at level $\alpha$ if and only if there exists a suite $\mathbf{E} = (e_S)_S$ of e-values for the partitioning hypotheses $H_S$ such that
+$$
+\mathcal{R} \subseteq \mathcal{R}_\alpha(\mathbf{E}).
+$$
+This is the FDR case of the e-Closure Principle. The suite condition above is exactly the e-collection condition of Definition 5 there, written separately for each partitioning hypothesis; the partitioning-hypothesis formulation is discussed in Section 9 of the same paper.
+:::
+
+::: {.proof}
+Following @xu2025closure, we prove the "if" direction here, which is the one the procedures later in the chapter rely on. Fix a distribution $P$. If $N_P = \emptyset$ there are no true nulls, so the FDP is zero for every rejection set and there is nothing to prove. Otherwise let $S = N_P$. The point is that once $P$ is fixed, $N_P$ is a single fixed subset of $[m]$, not a random one, so we may use it to pick out one particular constraint from the definition of $\mathcal{R}_\alpha(\mathbf{E})$. This is where the "for every $S$" requirement pays off. Membership in $\mathcal{R}_\alpha(\mathbf{E})$ guarantees the bound for all candidate configurations, and we apply it at the fixed configuration $S = N_P$. For every $R \in \mathcal{R}_\alpha(\mathbf{E})$,
+$$
+\operatorname{FDP}_P(R)
+=
+\frac{|R \cap N_P|}{|R| \vee 1}
+=
+\frac{|R \cap S|}{|R| \vee 1}
+\leq
+\alpha e_S .
+$$
+The first equality is the definition of the FDP, the second substitutes $S = N_P$, and the inequality is the defining constraint of $\mathcal{R}_\alpha(\mathbf{E})$ evaluated at this $S$. The bound $\alpha e_S$ on the right does not depend on $R$, so it bounds the FDP of every set in the collection at once, and hence bounds the maximum over the collection. Taking expectations,
+$$
+\mathbb{E}_P\left[
+\max_{R \in \mathcal{R}_\alpha(\mathbf{E})}
+\operatorname{FDP}_P(R)
+\right]
+\leq
+\alpha \mathbb{E}_P[e_S]
+\leq
+\alpha .
+$$
+The first inequality pulls out the constant $\alpha$ and uses the pointwise bound just established. The second uses that $e_S$ is an e-value for $H_S$ together with $P \in H_S$, which holds because $S = N_P$, so $\mathbb{E}_P[e_S] \leq 1$. This is the step where the validity of the partitioning e-value enters. Since the maximum over any subcollection $\mathcal{R} \subseteq \mathcal{R}_\alpha(\mathbf{E})$ is no larger than the maximum over the whole collection, the same bound holds for every such $\mathcal{R}$.
+:::
+
+The converse direction, that every simultaneous-FDR-controlling collection can be embedded in some e-Partitioning collection, is the deeper part of the principle. It is what turns the result into a full characterisation rather than a one-way sufficient condition, since it says that nothing is lost by studying procedures of the form $\mathcal{R}_\alpha(\mathbf{E})$. Any procedure that achieves simultaneous FDR control is, in principle, contained in $\mathcal{R}_\alpha(\mathbf{E})$ for an appropriate $\mathbf{E}$. The proof requires constructing the suite from a given collection and is given in @xu2025closure. The construction is direct, but the resulting suite is best understood as proof-of-concept rather than as a method-design tool. The procedures developed in the rest of this chapter proceed in the other direction, choosing a suite first and then forming the collection.
+
+Compound e-values provide a complementary reading. A vector of nonnegative statistics $(\widetilde E_1,\ldots,\widetilde E_m)$ consists of compound e-values if
+$$
+\sum_{i \in N_P} \mathbb{E}_P[\widetilde E_i] \leq m
+$$
+for every data-generating distribution $P$. Individual components need not be ordinary e-values; validity is imposed through this joint bound over the true nulls. @ignatiadis2024compound show that every FDR-controlling procedure can be reconstructed as eBH applied to suitable compound e-values. The e-Partitioning formulation works in the opposite direction. It starts from a chosen suite of e-values for the partitioning hypotheses $H_S$ and produces the collection $\mathcal{R}_\alpha(\mathbf{E})$. The two perspectives meet because the suite can exploit dependence and structural information that is invisible to a single list of marginal e-values $E_1, \ldots, E_m$.
+
+## eBH+ from averaged partition e-values {#sec-ebh-plus}
+
+The eBH+ procedure, called closed eBH in @xu2025closure, is obtained by applying the e-Partitioning Principle to a particularly simple suite of partition e-values. Let $E_1, \ldots, E_m$ be the per-hypothesis e-values from @sec-ebh. For every non-empty $S \subseteq [m]$, define
+$$
+e_S
+=
+\frac{1}{|S|}
+\sum_{i \in S} E_i .
+$$
+The arithmetic mean is the natural symmetric way to combine the e-values indexed by $S$ when no assumptions are made about their joint distribution. Importantly, the average is taken only over $S$. Under the partitioning hypothesis $H_S$, these are precisely the indices for which the individual e-value validity guarantees are available. Other valid suites give rise to different e-Partitioning procedures, and BY+ and Su+ in @sec-beyond-ebh-plus arise from suites tailored to p-value inputs.
+
+For instance, with $m = 3$ and per-hypothesis e-values $(E_1, E_2, E_3) = (6, 2, 1)$, the partition e-value for $S = \{1,2\}$ is $e_{\{1,2\}} = (6 + 2)/2 = 4$, while for the singleton $S = \{1\}$ it is $e_{\{1\}} = 6$ and for the full set $S = \{1,2,3\}$ it is $e_{\{1,2,3\}} = (6 + 2 + 1)/3 = 3$. In this example the smaller additional e-values dilute the evidence contributed by $E_1$. More generally, enlarging $S$ may either lower or raise the average, depending on the e-values that are added.
+
+To verify validity, fix $P \in H_S$. Then $P \in H_i$ for every $i \in S$, so $\mathbb{E}_P[E_i] \leq 1$ for all $i \in S$. By linearity of expectation,
+$$
+\mathbb{E}_P[e_S]
+=
+\frac{1}{|S|}
+\sum_{i \in S} \mathbb{E}_P[E_i]
+\leq 1 .
+$$
+Thus $e_S$ is an e-value for $H_S$.
+
+Applying the e-Partitioning Principle to the suite $\mathbf{E} = (e_S)_S$ gives the eBH+ collection
+$$
+\mathcal{R}_\alpha^{\mathrm{eBH+}}
+=
+\left\{
+R \subseteq [m] :
+\frac{|R \cap S|}{|R| \vee 1}
+\leq
+\frac{\alpha}{|S|}
+\sum_{i \in S} E_i
+\text{ for all non-empty } S \subseteq [m]
+\right\}.
+$$
+By @prp-e-partitioning, this collection controls simultaneous FDR at level $\alpha$. The implementation in @sec-ebh-plus-simulation selects a maximum-cardinality member as one representative of the collection.
+
+::: {#prp-ebh-plus-improves-ebh}
+## eBH+ uniformly improves eBH [adapted from @xu2025closure, Theorem 17]
+Let $R_{\mathrm{eBH}}$ denote the rejection set returned by eBH at level $\alpha$. Then
+$$
+R_{\mathrm{eBH}}
+\in
+\mathcal{R}_\alpha^{\mathrm{eBH+}}
+$$
+for every vector of e-values. Moreover, if $m \geq 2$, there are e-value vectors for which eBH rejects nothing, while $\mathcal{R}_\alpha^{\mathrm{eBH+}}$ contains a non-empty rejection set.
+:::
+
+::: {.proof}
+Following @xu2025closure, we prove the containment by showing that $R_{\mathrm{eBH}}$ satisfies the eBH+ constraint at every non-empty $S$, which is what membership in $\mathcal{R}_\alpha^{\mathrm{eBH+}}$ demands. If $R_{\mathrm{eBH}} = \emptyset$ the constraint reads $0 \leq \alpha e_S$, which holds since e-values are non-negative, so assume $R_{\mathrm{eBH}} \neq \emptyset$. Then $|R_{\mathrm{eBH}}| \vee 1 = |R_{\mathrm{eBH}}|$, and for a fixed non-empty $S$ the inequality to be verified is
+$$
+\frac{|R_{\mathrm{eBH}} \cap S|}{|R_{\mathrm{eBH}}|}
+\leq
+\frac{\alpha}{|S|} \sum_{i \in S} E_i .
+$$
+
+The starting point is the self-consistency property of eBH, which says that every rejected index carries at least the threshold amount of evidence,
+$$
+E_i \geq \frac{m}{\alpha |R_{\mathrm{eBH}}|}
+\qquad
+\text{for all } i \in R_{\mathrm{eBH}} .
+$$
+This bound is available only for rejected indices, so before using it we shrink the sum on the larger side to those indices. Fix a non-empty $S \subseteq [m]$. Then
+$$
+\frac{\alpha}{|S|} \sum_{i \in S} E_i
+\;\geq\;
+\frac{\alpha}{|S|} \sum_{i \in R_{\mathrm{eBH}} \cap S} E_i
+\;\geq\;
+\frac{\alpha}{|S|} \cdot |R_{\mathrm{eBH}} \cap S| \cdot \frac{m}{\alpha |R_{\mathrm{eBH}}|}
+\;=\;
+\frac{m}{|S|} \cdot \frac{|R_{\mathrm{eBH}} \cap S|}{|R_{\mathrm{eBH}}|}
+\;\geq\;
+\frac{|R_{\mathrm{eBH}} \cap S|}{|R_{\mathrm{eBH}}|}.
+$$
+Reading the chain from left to right, the first inequality drops the indices outside $R_{\mathrm{eBH}}$ from the sum, which can only lower it because every $E_i \geq 0$, and leaves a sum over $R_{\mathrm{eBH}} \cap S$ in which every index is rejected. The second inequality applies self-consistency to each of these $|R_{\mathrm{eBH}} \cap S|$ terms, replacing each $E_i$ by the common lower bound $m/(\alpha |R_{\mathrm{eBH}}|)$. The equality cancels the factor $\alpha$. The final inequality uses $|S| \leq m$, so that $m/|S| \geq 1$. The two ends of the chain are exactly the eBH+ constraint at $R = R_{\mathrm{eBH}}$ for this $S$. Since $S$ was an arbitrary non-empty subset, $R_{\mathrm{eBH}} \in \mathcal{R}_\alpha^{\mathrm{eBH+}}$.
+:::
+
+The examples below show how this containment can be strict.
+
+::: {#exm-ebh-plus-numerical}
+## A four-hypothesis strict-improvement example
+
+Take $m = 4$ hypotheses and test at level $\alpha = 0.05$. Suppose the four e-values are
+$$
+(E_1,E_2,E_3,E_4) = (50,\, 30,\, 1,\, 1).
+$$
+The first two e-values carry substantial evidence against their null hypotheses, while the last two are neutral.
+
+First consider eBH. The e-values are already in decreasing order, and the eBH thresholds are
+$$
+\frac{m}{\alpha k}
+=
+\frac{4}{0.05\, k}
+=
+\frac{80}{k} .
+$$
+Thus the rank-wise comparisons are
+$$
+50 < 80,
+\qquad
+30 < 40,
+\qquad
+1 < \frac{80}{3},
+\qquad
+1 < 20 .
+$$
+No rank satisfies the eBH condition, so eBH rejects nothing.
+
+Now consider the candidate rejection set
+$$
+R = \{1,2\} .
+$$
+We show that $R$ is admissible for eBH+. The eBH+ condition requires
+$$
+\frac{|R \cap S|}{|R| \vee 1}
+=
+\frac{|R \cap S|}{2}
+\;\leq\;
+\frac{\alpha}{|S|} \sum_{i \in S} E_i
+$$
+for every non-empty $S \subseteq [4]$. There are three cases.
+
+*If $S$ contains neither $1$ nor $2$*, then $|R \cap S| = 0$ and the inequality is immediate.
+
+*If $S$ contains both $1$ and $2$*, then the sum over $S$ contains the terms $E_1$ and $E_2$, and dropping any further indices only lowers it because the remaining e-values are non-negative, so
+$$
+\sum_{i \in S} E_i \;\geq\; E_1 + E_2 \;=\; 80
+\qquad \text{and} \qquad
+|S| \leq 4,
+$$
+which gives
+$$
+\frac{\alpha}{|S|} \sum_{i \in S} E_i
+\;\geq\;
+\frac{0.05}{4} \cdot 80
+\;=\;
+1
+\;=\;
+\frac{|R \cap S|}{2} .
+$$
+
+*If $S$ contains exactly one of $1$ and $2$*, two subcases arise. If $1 \in S$ but $2 \notin S$, then $\sum_{i \in S} E_i \geq E_1 = 50$ and $|S| \leq 3$, so
+$$
+\frac{\alpha}{|S|} \sum_{i \in S} E_i
+\;\geq\;
+\frac{0.05}{3} \cdot 50
+\;>\;
+\frac{1}{2} .
+$$
+If $2 \in S$ but $1 \notin S$, then $\sum_{i \in S} E_i \geq E_2 = 30$ and $|S| \leq 3$, so
+$$
+\frac{\alpha}{|S|} \sum_{i \in S} E_i
+\;\geq\;
+\frac{0.05}{3} \cdot 30
+\;=\;
+\frac{1}{2} .
+$$
+
+The eBH+ constraint therefore holds for every non-empty $S \subseteq [4]$, and hence
+$$
+\{1,2\} \in \mathcal{R}_\alpha^{\mathrm{eBH+}} .
+$$
+On this input, eBH rejects nothing, while eBH+ allows rejection of the two hypotheses with the largest e-values. The case analysis uses lower bounds that meet the required thresholds; the actual vector has slight slack because $E_3 = E_4 = 1$. For example, the full-set constraint reads $1 \leq 1.025$. The next example sets the remaining e-values to zero and turns the same mechanism into a general strict-improvement witness.
+:::
+
+The following general witness is taken from the proof of Theorem 17 in @xu2025closure.
+
+::: {#exm-ebh-plus-strict}
+## A general witness for strict improvement
+
+The construction is chosen so that $E_1$ falls just below the eBH-at-rank-one threshold $m/\alpha$, with the slack $1/(2\alpha)$ deposited in $E_2$. Two mechanisms then combine to make the singleton $\{1\}$ admissible for eBH+ even though eBH rejects nothing. For sets $S$ containing both indices, the pair sums to exactly $E_1 + E_2 = m/\alpha$, which clears the average threshold. For sets $S$ containing $1$ but not $2$, excluding index $2$ caps the size at $|S| \leq m - 1$, and $E_1$ alone is large enough to clear the threshold over this smaller denominator. The split of $m/\alpha$ into $m - 1/2$ and $1/2$ parts is chosen precisely so that both mechanisms work at once.
+
+Let $m \geq 2$ be an integer and consider
+$$
+E_1 = \frac{m - 1/2}{\alpha},
+\qquad
+E_2 = \frac{1}{2\alpha},
+\qquad
+\text{and set } E_i = 0 \text{ for all } i \geq 3
+$$
+(the last condition is vacuous when $m = 2$). The descending order is $E_{[1]} = E_1$, $E_{[2]} = E_2$, and $E_{[k]} = 0$ for $k \geq 3$. The eBH condition is
+$$
+E_{[k]} \geq \frac{m}{\alpha k} .
+$$
+For $k = 1$, $E_{[1]} = (m-1/2)/\alpha < m/\alpha$. For $k = 2$, $E_{[2]} = 1/(2\alpha) < m/(2\alpha)$ since $m \geq 2$. For $k \geq 3$, $E_{[k]} = 0$, so the eBH condition also fails. Thus eBH rejects nothing.
+
+Now consider $R = \{1\}$. Because $R$ is a singleton, the left-hand side of the eBH+ constraint simplifies to an indicator,
+$$
+\frac{|\{1\} \cap S|}{|\{1\}| \vee 1}
+=
+\mathbf{1}\{1 \in S\}.
+$$
+For $S$ with $1 \notin S$ the left-hand side is zero and the constraint holds automatically, since e-values are non-negative. It therefore remains to show that $\alpha e_S \geq 1$ for every $S$ containing $1$, and there are two cases.
+
+If $2 \in S$, then dropping the zero terms $E_i$ with $i \geq 3$ leaves
+$$
+\sum_{i \in S} E_i
+=
+E_1 + E_2
+=
+\frac{m - 1/2}{\alpha} + \frac{1}{2\alpha}
+=
+\frac{m}{\alpha},
+$$
+so
+$$
+\alpha e_S = \frac{m}{|S|} \geq 1
+$$
+since $|S| \leq m$.
+
+If $2 \notin S$, then $E_2$ is excluded and all $E_i$ with $i \geq 3$ are zero, so the sum reduces to
+$$
+\sum_{i \in S} E_i = E_1 = \frac{m - 1/2}{\alpha}.
+$$
+Moreover, $S$ omits index $2$, so it contains at most $m - 1$ indices, giving
+$$
+\alpha e_S
+=
+\frac{m - 1/2}{|S|}
+\geq
+\frac{m - 1/2}{m - 1}
+>
+1 .
+$$
+In both cases $\alpha e_S \geq 1 = \mathbf{1}\{1 \in S\}$, so the eBH+ constraint holds for every non-empty $S \subseteq [m]$, and therefore
+$$
+\{1\}
+\in
+\mathcal{R}_\alpha^{\mathrm{eBH+}} .
+$$
+:::
+
+The example shows that eBH can reject nothing when the largest e-value falls just below the rank-one threshold $m/\alpha$. The eBH+ collection can still contain a singleton rejection such as $\{1\}$, because the admissibility check also uses averages over partitioning sets $S$ containing other hypotheses. Thus, e-values outside the proposed rejection set can help certify that this set satisfies the simultaneous FDR constraint.
+
+## Implementation and a small simulation {#sec-ebh-plus-simulation}
+
+The function `e_bh()` from @sec-ebh returns one rejection set. This section adds two small helper functions for eBH+. The first checks whether a proposed set $R$ belongs to the eBH+ collection $\mathcal{R}_\alpha^{\mathrm{eBH+}}$. The second searches for a maximum-cardinality member of the collection, breaking ties by the total e-value in the candidate set. The search is deliberately exhaustive and is intended only for small teaching examples rather than for scalable computation.
+
+Checking one proposed set requires enumerating all non-empty subsets $S \subseteq [m]$, so `ebh_plus_in_collection` accepts only small $m$. Searching for a maximum-cardinality admissible set additionally enumerates all $2^m - 1$ candidate rejection sets $R$, and checking each one costs $O(m2^m)$ through a matrix-vector product with $m$ columns. The total is therefore $O(m4^m)$, which is why `ebh_plus_largest()` uses a default limit of `max_m = 12`, where $4^{12}$ is already about $1.7 \times 10^7$.
+
+Unlike `e_bh()`, the exhaustive eBH+ helpers restrict their inputs to finite e-values. This is a numerical requirement of the dense subset-matrix implementation, since the product `members %*% e` used for the right-hand side would create undefined $0 \times \infty$ terms for subsets that exclude an infinite coordinate. The limit $m \leq 20$ in `ebh_plus_in_collection` is a hard guard rather than a recommended working size, since the membership matrix has $m(2^m-1)$ entries and becomes memory-intensive near the cap.
+
+```{r}
+#| label: code-ebh-plus-functions
+
+# Small tolerance for floating-point comparisons in matrix multiplications.
+tol <- 100 * .Machine$double.eps
+
+ebh_plus_in_collection <- function(R, e, alpha) {
+  stopifnot(
+    is.numeric(e),
+    length(e) >= 1L,
+    all(e >= 0),
+    all(is.finite(e)),
+    alpha > 0,
+    alpha < 1,
+    length(unique(R)) == length(R),
+    all(R %in% seq_along(e))
+  )
+
+  m <- length(e)
+  if (m > 20L) {
+    stop("Exhaustive subset enumeration is intended only for small m.")
+  }
+
+  R <- as.integer(R)
+
+  # Enumerate all non-empty subsets of [m] via binary masks: integer s in
+  # {1,...,2^m - 1} represents the subset {i : bit i of s is set}.
+  masks <- seq_len(2^m - 1L)
+  bits <- 2 ^ (seq_len(m) - 1L)
+  members <- outer(
+    masks,
+    bits,
+    FUN = function(mask, bit) (mask %/% bit) %% 2L == 1L
+  )
+
+  subset_size <- rowSums(members)
+  in_R <- seq_len(m) %in% R
+
+  lhs <- as.numeric(members %*% as.integer(in_R)) /
+    max(length(R), 1L)
+
+  rhs <- alpha * as.numeric(members %*% e) / subset_size
+
+  all(lhs <= rhs + tol)
+}
+
+ebh_plus_largest <- function(e, alpha, max_m = 12) {
+  stopifnot(
+    is.numeric(e),
+    length(e) >= 1L,
+    all(e >= 0),
+    all(is.finite(e)),
+    alpha > 0,
+    alpha < 1,
+    max_m >= 1,
+    length(e) <= max_m
+  )
+
+  m <- length(e)
+
+  # Enumerate all non-empty subsets of [m] via binary masks, as above.
+  masks <- seq_len(2^m - 1L)
+  bits <- 2 ^ (seq_len(m) - 1L)
+  members <- outer(
+    masks,
+    bits,
+    FUN = function(mask, bit) (mask %/% bit) %% 2L == 1L
+  )
+
+  subset_size <- rowSums(members)
+  subset_e_sum <- as.numeric(members %*% e)
+  rhs <- alpha * subset_e_sum / subset_size
+
+  # Iterate candidates by decreasing cardinality, breaking ties by total
+  # e-value in the set, and return the first admissible candidate.
+  candidate_order <- order(
+    subset_size,
+    subset_e_sum,
+    decreasing = TRUE
+  )
+
+  for (idx in candidate_order) {
+    in_R <- members[idx, ]
+    r_size <- subset_size[idx]
+
+    lhs <- as.numeric(members %*% as.integer(in_R)) / r_size
+
+    if (all(lhs <= rhs + tol)) {
+      return(in_R)
+    }
+  }
+
+  rep(FALSE, m)
+}
+```
+
+The membership function returns a single logical value, while the search function returns a logical vector aligned with the input, matching the convention of `e_bh()` from @sec-ebh. Applied to the input from @exm-ebh-plus-numerical, the implementations reproduce the worked calculation. The set $\{1, 2\}$ is admissible, and the maximum-cardinality search also returns $\{1, 2\}$. No larger set can be admissible here, since any candidate of size three or four contains index $3$ or $4$ and fails the constraint at the corresponding singleton $S$, where the left-hand side is at least $1/4$ but $\alpha E_3 = \alpha E_4 = 0.05$.
+
+```{r}
+#| label: check-ebh-plus-functions
+
+e_num <- c(50, 30, 1, 1)
+ebh_plus_in_collection(R = c(1, 2), e = e_num, alpha = 0.05)
+ebh_plus_largest(e = e_num, alpha = 0.05)
+```
+
+The function `ebh_plus_largest()` returns one admissible set, not the whole collection; if no non-empty candidate is admissible it returns the empty set, which always belongs to the collection. This is enough for the simulation below. Since eBH+ controls FDR simultaneously over all sets in the collection, any data-dependent rule that selects a member of the collection is covered by the simultaneous guarantee.
+
+
+The simulation below uses `MASS::mvrnorm()` through an explicit namespace; the setup chunk checks that the `MASS` package is available.
+
+We now adapt the positively dependent simulation setting from @goeman2025epartitioning. There are $m = 8$ hypotheses, a null proportion $\pi_0 = 0.25$, and hence six non-null hypotheses. We take
+$$
+\mu = (A, A, A, A, A, A, 0, 0),
+$$
+so that $N_P = \{7, 8\}$. The covariance matrix is Toeplitz,
+$$
+\Sigma_{ij} = 0.8^{|i-j|}.
+$$
+For each signal strength
+$$
+A \in \{0.125, 0.25, 0.375, 0.5\},
+$$
+we generate $n = 100$ independent observations $Z^{(1)}, \ldots, Z^{(n)} \sim N(\mu, \Sigma)$ and compute the product e-value
+$$
+E_j = \prod_{\ell=1}^{n} \exp(A Z_j^{(\ell)} - A^2/2) = \exp\left(A \sum_{\ell=1}^{n} Z_j^{(\ell)} - \frac{n A^2}{2}\right).
+$$
+The text of @goeman2025epartitioning states the single-observation factor $\exp(a_j Z_j - a_j^2/2)$; the accompanying simulation code aggregates it over the $n$ repeated observations as a product of independent per-observation factors, and the same aggregation is used here. The oracle tuning $a = A$ is used for all hypotheses, so that eBH and eBH+ are compared on the same e-values and the comparison isolates the multiple-testing step rather than the e-value design step. The negatively dependent case is mentioned in @goeman2025epartitioning but is not reproduced here.
+
+```{r}
+#| label: code-ebh-plus-simulation
+#| cache: true
+
+set.seed(20260505)
+
+alpha <- 0.05
+m <- 8
+pi0 <- 0.25
+m0 <- as.integer(m * pi0)
+n_per <- 100
+n_rep <- 1000
+A_values <- c(0.125, 0.25, 0.375, 0.5)
+
+true_nulls <- (m - m0 + 1L):m
+false_nulls <- setdiff(seq_len(m), true_nulls)
+
+Sigma <- 0.8 ^ abs(outer(seq_len(m), seq_len(m), "-"))
+
+as_rejection_indices <- function(x) {
+  if (is.logical(x)) {
+    which(x)
+  } else {
+    as.integer(x)
+  }
+}
+
+fdp <- function(R) {
+  R <- as_rejection_indices(R)
+  length(intersect(R, true_nulls)) / max(length(R), 1L)
+}
+
+power_value <- function(R) {
+  R <- as_rejection_indices(R)
+  length(intersect(R, false_nulls)) / length(false_nulls)
+}
+
+simulate_setting <- function(A) {
+  mu <- rep(A, m)
+  mu[true_nulls] <- 0
+
+  out <- replicate(n_rep, {
+    z_samples <- MASS::mvrnorm(n = n_per, mu = mu, Sigma = Sigma)
+    z_sum <- colSums(z_samples)
+
+    e_values <- exp(A * z_sum - n_per * A^2 / 2)
+
+    R_ebh  <- e_bh(e_values, alpha = alpha)
+    R_plus <- ebh_plus_largest(e_values, alpha = alpha)
+
+    c(
+      fdr_ebh    = fdp(R_ebh),
+      power_ebh  = power_value(R_ebh),
+      fdr_plus   = fdp(R_plus),
+      power_plus = power_value(R_plus)
+    )
+  })
+
+  data.frame(
+    A = A,
+    method = c("eBH", "eBH+"),
+    fdr   = c(mean(out["fdr_ebh", ]),   mean(out["fdr_plus", ])),
+    power = c(mean(out["power_ebh", ]), mean(out["power_plus", ]))
+  )
+}
+
+simulation_results <- do.call(
+  rbind,
+  lapply(A_values, simulate_setting)
+)
+
+simulation_results$method <- factor(
+  simulation_results$method,
+  levels = c("eBH", "eBH+")
+)
+
+max_fdr <- max(simulation_results$fdr)
+
+fdr_compare <- merge(
+  subset(simulation_results, method == "eBH",  select = c(A, fdr, power)),
+  subset(simulation_results, method == "eBH+", select = c(A, fdr, power)),
+  by = "A",
+  suffixes = c("_ebh", "_plus")
+)
+
+n_settings <- nrow(fdr_compare)
+fdr_n_higher <- sum(fdr_compare$fdr_plus > fdr_compare$fdr_ebh)
+power_n_higher <- sum(fdr_compare$power_plus > fdr_compare$power_ebh)
+
+fdr_comparison_text <- if (fdr_n_higher == n_settings) {
+  "at every signal strength"
+} else {
+  sprintf("at %d of the %d signal strengths", fdr_n_higher, n_settings)
+}
+power_comparison_text <- if (power_n_higher == n_settings) {
+  "at every signal strength"
+} else {
+  sprintf("at %d of the %d signal strengths", power_n_higher, n_settings)
+}
+
+max_fdr_row <- simulation_results[which.max(simulation_results$fdr), ]
+max_fdr_A <- max_fdr_row$A
+max_fdr_method <- as.character(max_fdr_row$method)
+```
+
+The empirical FDR is the Monte Carlo average of
+$$
+\frac{|R \cap N_P|}{|R| \vee 1},
+$$
+and the empirical power is the Monte Carlo average of
+$$
+\frac{|R \cap N_P^c|}{|N_P^c|}.
+$$
+The power reported here is therefore the true-positive proportion, the fraction of non-null hypotheses that are rejected. In the simulation code accompanying @goeman2025epartitioning, the plotted power instead divides the average total number of rejections, true and false, by the number of non-null hypotheses. The two definitions nearly coincide in this setting because false discoveries are rare, but the comparison with the published figure is qualitative rather than exact.
+
+```{r}
+#| label: tbl-ebh-plus-simulation
+#| echo: false
+
+knitr::kable(
+  transform(
+    simulation_results,
+    fdr = round(fdr, 3),
+    power = round(power, 3)
+  ),
+  caption = "Empirical FDR and power in the eBH+ simulation."
+)
+```
+
+```{r}
+#| label: fig-ebh-plus-power
+#| fig-cap: "Empirical power of eBH and the maximum-cardinality eBH+ selection as a function of signal strength."
+#| fig-width: 7
+#| fig-height: 4
+#| echo: false
+
+ggplot2::ggplot(
+  simulation_results,
+  ggplot2::aes(x = A, y = power, linetype = method, shape = method)
+) +
+  ggplot2::geom_line() +
+  ggplot2::geom_point(size = 2) +
+  ggplot2::scale_x_continuous(breaks = A_values) +
+  ggplot2::scale_y_continuous(limits = c(0, 1)) +
+  ggplot2::labs(
+    x = "Signal strength A",
+    y = "Empirical power",
+    linetype = NULL,
+    shape = NULL
+  ) +
+  ggplot2::theme_minimal(base_size = 12)
+```
+
+@tbl-ebh-plus-simulation and @fig-ebh-plus-power show that the maximum-cardinality eBH+ selection has higher empirical FDR than eBH `r fdr_comparison_text`, while also having higher empirical power `r power_comparison_text`. The maximum-cardinality selection rejects at least as many hypotheses as eBH in every realisation, because $R_{\mathrm{eBH}}$ belongs to the eBH+ collection by @prp-ebh-plus-improves-ebh and the search returns a member of maximal size. All empirical FDR estimates for both methods remain below the nominal level $\alpha = 0.05$; the largest is `r round(max_fdr, 3)`, attained by `r max_fdr_method` at signal strength $A = `r max_fdr_A`$.
+
+In the terminology of @xu2025closure (Definition 16), the improvement in @prp-ebh-plus-improves-ebh is both a simultaneity improvement and a power improvement, and both are deterministic statements about the observed e-value vector: the eBH rejection set itself remains admissible, and the eBH+ collection can admit a strictly larger rejection set. This rejection-set comparison is distinct from the empirical true-positive-proportion comparison in the simulation. Both the eBH rejection set and the selected member of the eBH+ collection retain level-$\alpha$ FDR control.
+
+The exhaustive functions above are useful because they mirror the definition of $\mathcal{R}_\alpha^{\mathrm{eBH+}}$ directly. They should not be used as a replacement for specialised software. For larger or non-didactic analyses, the CRAN package `eClosure` [@eclosure] implements the closed-eBH and closed-BY procedures described by @xu2025closure. For large $m$, polynomial shortcuts are available for eBH+. Section 10 of @xu2025closure gives an $O(m^2 \log m)$ algorithm for finding the largest rejected set of the form $[r] = \{1, \ldots, r\}$, the top $r$ hypotheses after ordering by decreasing e-value, and an $O(m \log m)$ algorithm for checking a fixed set.
+
+## Post-hoc flexibility {#sec-post-hoc-fdr}
+
+The eBH procedure in @sec-ebh returns the single rejection set
+$$
+R_{\mathrm{eBH}} \subseteq [m].
+$$
+By contrast, the e-Partitioning procedure in @sec-e-partitioning, and in particular eBH+ from @sec-ebh-plus, returns a whole collection of admissible rejection sets,
+$$
+\mathcal{R}_\alpha(\mathbf{E})
+\quad
+\text{or}
+\quad
+\mathcal{R}_\alpha^{\mathrm{eBH+}}.
+$$
+This distinction is practically important. The output is no longer just one set that must be reported exactly as produced by the algorithm. The researcher may choose any element of the collection after inspecting the data, while retaining the same simultaneous FDR guarantee.
+
+This follows directly from @prp-e-partitioning. For a collection $\mathcal{R}$ with simultaneous FDR control, the guarantee is
+$$
+\mathbb{E}_P\left[
+\max_{R \in \mathcal{R}}
+\operatorname{FDP}_P(R)
+\right]
+\leq
+\alpha .
+$$
+The bound therefore covers the worst false discovery proportion over every set in the collection. If an analyst later selects a particular $R \in \mathcal{R}$ after looking at the realised e-values, its FDP is bounded by the maximum over the collection. Post-hoc selection is not an extra operation outside the guarantee. It is one of the choices already covered.
+
+This gives a different kind of flexibility from the optional stopping discussed in @sec-eprocesses. There, the time at which the evidence is read may be data-dependent. Here, the realised collection and the final choice from that collection may both depend on the data.
+
+One immediate use is interpretability. Suppose that $\mathcal{R}_\alpha^{\mathrm{eBH+}}$ contains both a maximum-cardinality admissible set and a smaller set that is easier to explain scientifically. The maximum-cardinality set may be attractive if the only goal is to maximise the number of discoveries. The smaller set may be preferable if it corresponds to a coherent scientific unit. In Section 8.1, @xu2025closure discuss settings where hypotheses correspond to voxels in neuroimaging or molecular markers in bioinformatics. In such applications, researchers often interpret discoveries as clusters or pathways rather than as isolated indices. Simultaneous FDR control permits such a set to be reported post-hoc, provided that it belongs to the admissible collection.
+
+The crucial qualification is that the post-hoc flexibility extends only to elements of the collection. Sets outside $\mathcal{R}_\alpha(\mathbf{E})$ lack the simultaneous guarantee, and reporting them as FDR-controlled would be unjustified. Post-hoc *selection from the realised admissible collection* is covered by the guarantee. Post-hoc *modification outside that collection* is not. The collection defines that boundary precisely.
+
+One consequence deserves emphasis, because it is easy to get backwards. The collection is not closed under taking subsets, so reporting fewer discoveries than an admissible set is not automatically safe. Shrinking $R$ shrinks the denominator $|R| \vee 1$, while $|R \cap S|$ need not shrink in step, so a subset of an admissible set can fail a constraint that the larger set passed. For example, at $m = 3$ and $\alpha = 0.05$ with $E = (25, 25, 10)$, eBH rejects nothing, both $\{1,2\}$ and $\{1,2,3\}$ are admissible, and none of the three singletons is. An analyst holding the admissible set $\{1,2\}$ who reports only hypothesis $1$, on the grounds that fewer claims must be more conservative, has left the collection and lost the guarantee. This is exactly the situation @xu2025closure describe when they note that naively discarding low-effect-size findings from an FDR-significant set, as in volcano-plot filtering, may compromise FDR control.
+
+A second consequence concerns the relation between FDR and FWER. For a singleton set $\{i\}$, the false discovery proportion is either zero or one:
+$$
+\operatorname{FDP}_P(\{i\})
+=
+\mathbf{1}\{i \in N_P\}.
+$$
+Thus, for a single reported singleton, its FDR is just the probability that this reported discovery is false. @xu2025closure (Theorem 39 in Section 8.2; proof in Appendix H.9) give the corresponding family-wise statement. If a simultaneous FDR-controlled collection $\mathcal{R}$ contains singleton sets, define
+$$
+R_{\mathrm{sing}} = \{i \in [m] : \{i\} \in \mathcal{R}\}.
+$$
+Then $R_{\mathrm{sing}}$ controls FWER at the same level, meaning that the probability that $R_{\mathrm{sing}}$ contains any true null is at most $\alpha$. Importantly, $R_{\mathrm{sing}}$ itself need not be an element of $\mathcal{R}$. The proof is short enough to give in full.
+
+::: {.proof}
+Following the proof of Theorem 39 in Appendix H.9 of @xu2025closure, let $\mathcal{S}_{\mathrm{sing}} = \{\{i\} : \{i\} \in \mathcal{R}\}$ be the singleton sets contained in the collection, and adopt the convention that a maximum over an empty set is zero. Then
+$$
+\begin{aligned}
+\mathbb{P}_P(R_{\mathrm{sing}} \cap N_P \neq \emptyset)
+&=
+\mathbb{E}_P\left[
+\max_{i \in R_{\mathrm{sing}}}
+\mathbf{1}\{i \in N_P\}
+\right]
+\\
+&=
+\mathbb{E}_P\left[
+\max_{R \in \mathcal{S}_{\mathrm{sing}}}
+\operatorname{FDP}_P(R)
+\right]
+\\
+&\leq
+\mathbb{E}_P\left[
+\max_{R \in \mathcal{R}}
+\operatorname{FDP}_P(R)
+\right]
+\\
+&\leq
+\alpha .
+\end{aligned}
+$$
+The first equality rewrites the event of at least one false rejection as a maximum of indicators over the rejected singletons. The second uses the singleton identity above, since $\operatorname{FDP}_P(\{i\}) = \mathbf{1}\{i \in N_P\}$ and the indices in $R_{\mathrm{sing}}$ correspond exactly to the sets in $\mathcal{S}_{\mathrm{sing}}$. The first inequality enlarges the maximum from $\mathcal{S}_{\mathrm{sing}}$ to the full collection, using $\mathcal{S}_{\mathrm{sing}} \subseteq \mathcal{R}$, and the final inequality is the simultaneous FDR guarantee. The argument only ever bounds maxima over sets that belong to $\mathcal{R}$, which is why $R_{\mathrm{sing}}$ itself never needs to be a member.
+:::
+
+Since $\operatorname{FDP}_P(R_{\mathrm{sing}}) \leq \mathbf{1}\{R_{\mathrm{sing}} \cap N_P \neq \emptyset\}$, family-wise control of $R_{\mathrm{sing}}$ also implies ordinary FDR control for this singleton-based rejection set, so the switch adds the stricter guarantee rather than trading one for the other. The switch from an FDR statement to an FWER statement can therefore be made after seeing the data, as long as it is based on singleton sets contained in the simultaneous collection.
+
+In practice, a strong signal may therefore support both a broad FDR-controlled discovery set and a smaller list of individually protected discoveries. The broad set answers a discovery-oriented question about which collection of hypotheses can be reported while controlling the expected false discovery proportion. The singleton-based set answers a stricter question about which individual hypotheses can be reported while controlling the probability of any false individual discovery.
+
+The practical gain from post-hoc flexibility is therefore distinct from any power advantage. When the realised collection contains several scientifically meaningful admissible sets, the analyst may choose among them after inspecting the data (for scientific interpretability, for a stricter error criterion, or for another transparent reporting goal) without leaving the simultaneous guarantee supplied by the e-Partitioning Principle.
+
+## Beyond eBH+: BY+ and Su+ {#sec-beyond-ebh-plus}
+
+The eBH+ procedure is one concrete instance of the e-Partitioning Principle. Once an existing FDR procedure can be represented through suitable partitioning e-values, the corresponding e-Partitioning collection often gives a uniform improvement. @tbl-plus-variants summarises the three examples discussed in this chapter.
+
+| Input    | Classical method | Plus variant | Dependence assumption |
+|----------|------------------|--------------|-----------------------|
+| e-values | eBH              | eBH+         | Arbitrary dependence  |
+| p-values | BY               | BY+          | Arbitrary dependence  |
+| p-values | Su               | Su+          | PRDN                  |
+
+: Plus variants generated by the e-Partitioning Principle. The dependence assumption applies to the classical method and its plus variant alike. {#tbl-plus-variants}
+
+The BY procedure of @benjamini2001by is BH run at the reduced level $\alpha/h_m$, where
+$$
+h_m = \sum_{k=1}^m \frac{1}{k}
+$$
+is the $m$-th harmonic number. Equivalently, it rejects up to the largest rank $r$ satisfying
+$$
+p_{(r)} \leq \frac{r\alpha}{m h_m}.
+$$
+This correction makes BY valid under arbitrary dependence of the p-values. Since $h_m$ grows roughly like $\log m$, arbitrary dependence for p-values is paid for by a logarithmic penalty in the rejection threshold. @xu2025closure construct the corresponding e-Partitioning collection from the p-values underlying BY. The resulting BY+ procedure returns a simultaneous FDR-controlled collection and uniformly improves BY for $m \geq 2$, in the same sense that eBH+ uniformly improves eBH (Theorem 28 of @xu2025closure).
+
+@xu2025closure apply the same idea to the procedure of @su2018. This method is valid under positive regression dependence on the null p-values (PRDN), a positive dependence condition imposed only on the p-values corresponding to true null hypotheses. This is weaker than the PRDS condition commonly used for BH, which also involves the p-values of false hypotheses. The Su procedure itself can be viewed as BH run at the reduced level $\alpha/\ell_\alpha$, where $\ell_\alpha = -W_{-1}(-\alpha/e)$ and $W_{-1}$ is the lower branch of the Lambert W function. For example, $\ell_{0.05} \approx 5.74$, so at nominal level $0.05$ the Su procedure runs BH at roughly $0.0087$, about $17\%$ of the nominal level. The plus variant, Su+, retains the PRDN assumption and replaces the single classical rejection set by a simultaneous e-Partitioning collection, and Theorem 34 of @xu2025closure gives the analogous uniform-improvement result for $\alpha \in (0,1)$ and $m \geq 2$. Its role in this chapter is mainly conceptual. It shows that the e-Partitioning Principle is not tied to arbitrary-dependence procedures such as eBH or BY, but can also sharpen procedures that exploit positive dependence.
+
+Taken together, eBH+, BY+, and Su+ illustrate a systematic pattern. The e-Partitioning Principle turns single-set FDR procedures into members of a larger, simultaneously valid collection, and this often creates room for post-hoc flexibility or larger rejection sets at the same nominal level. A further development not pursued here is the use of restricted combinations, where logical relationships between hypotheses can be incorporated through the partitioning hypotheses themselves.
+
+## Summary and practical guidance {#sec-multiple-testing-summary}
+
+This chapter has shown how the e-values constructed in @sec-safe-tests and @sec-eprocesses can be used as building blocks for multiple testing. The eBH procedure gives a direct FDR method for one e-value per hypothesis and remains valid under arbitrary dependence. The e-Partitioning Principle then gives a broader view. Simultaneous FDR control is fully characterised by partitioning e-values, and this representation leads to constructive improvements such as eBH+, BY+, and Su+.
+
+- If one valid e-value is available for each hypothesis and the goal is ordinary FDR control, eBH is the simplest default choice. Its main advantage is robustness. The guarantee does not require independence or any positive-dependence assumption among the e-values.
+
+- If simultaneous FDR control, post-hoc selection, or potential power improvement is important, eBH+ is the natural next step, subject to the computational caveat below. It replaces the single eBH rejection set by the collection $\mathcal{R}_\alpha^{\mathrm{eBH+}}$, allowing the rejection set to be chosen from the admissible collection after inspecting the results. Post-hoc selection means choosing a member of the collection, not shrinking one: the collection is not closed under taking subsets, so a subset of an admissible set need not itself be admissible.
+
+- For larger or non-didactic analyses, exhaustive subset enumeration should be avoided. The CRAN package `eClosure` [@eclosure] implements closed-eBH and closed-BY procedures from @xu2025closure, while Section 10 of that paper gives polynomial algorithms for the prefix-set search and the membership check.
+
+- If the input consists of p-values rather than e-values, BY+ and Su+ are the corresponding plus variants. BY+ applies under arbitrary dependence, whereas Su+ uses the PRDN condition carried over from the original Su procedure.
+
+- E-values are not automatically more powerful than p-values in fixed-sample comparisons. Their practical advantage is strongest when robustness to dependence, optional stopping or continuation, or post-hoc selection is part of the analysis.
+
+The conceptual link to @sec-eprocesses is that simultaneous FDR control plays a role analogous to anytime-validity in the multiple-testing setting. In the sequential setting of @sec-eprocesses, validity was protected over an entire time path. Here it is protected over an entire collection of rejection sets. In both cases, flexible data-dependent decisions remain valid because what is controlled is the larger object, not just the final reported choice.

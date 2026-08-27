@@ -1,0 +1,1572 @@
+# Case study {#sec-case-study}
+
+## Case study overview and design {#sec-case-study-aim}
+
+This chapter brings together the methods developed earlier in two applied settings. The main example is a randomised clinical trial of antiretroviral treatments. It allows the evidence to be assessed at the end of follow-up, followed as events accumulate, and evaluated across several treatment and endpoint comparisons. A second example uses a collection of tuberculosis-vaccine studies to illustrate how evidence can be accumulated across separate studies. Together, the two examples show how the design choices and validity conditions from the earlier chapters enter an applied analysis.
+
+The main dataset comes from study 175 of the AIDS Clinical Trials Group (ACTG 175), which randomised participants aged 12 or older with human immunodeficiency virus (HIV) and baseline CD4 counts between 200 and 500 cells per cubic millimetre to four antiretroviral regimens. The four regimens were zidovudine alone, didanosine alone, zidovudine with didanosine, or zidovudine with zalcitabine [@hammer1996trial]. The analyses use the version of the trial data distributed in `speff2trial::ACTG175` [@speff2trial].
+
+CD4 and CD8 T cells are involved in the immune response. CD4 T cells coordinate that response and are a primary target of HIV, while CD8 T cells help identify and destroy infected cells. The dataset records both counts at baseline and in a 20 ± 5 week assessment window.
+
+The main ACTG analysis compares `ZDV only` with the three active arms pooled as `Other therapy`. The endpoint is the time to a decline in CD4 count of at least 50%, progression to AIDS, or death. Safe and classical logrank tests are applied at the end of follow-up, after which the event sequence is replayed to compare safe monitoring with repeated unadjusted logrank tests. CD4 and CD8 changes at 20 weeks are analysed with safe and classical t-tests, and event-free status at 96 weeks with a classical two-proportions comparison. The three active arms are also compared separately with zidovudine alone across the survival, CD4, and CD8 endpoints using eBH.
+
+Because the package dataset has no reliable enrolment-order variable, the sequential analyses replay event time retrospectively rather than reconstructing the trial's historical monitoring.
+
+For the separate-study analysis, the BCG vaccine data in `metadat::dat.bcg` [@metadat; @colditz1994bcg] provide the two-by-two tables used to illustrate the product construction in @prp-product-construction.
+
+The observed datasets show how the methods are applied. They do not establish error control or power. Type-I error guarantees follow from the theoretical results, while the simulations estimate operating characteristics for the designs considered here. E-values are compared with $1/\alpha$ and p-values with $\alpha$.
+
+The following testing levels and design alternatives are used throughout the chapter.
+
+```{r}
+#| label: setup-case-study-design
+#| message: false
+#| warning: false
+
+alpha_single <- 0.05   # level for single safe tests
+beta_design  <- 0.20   # design type-II error
+alpha_fdr    <- 0.10   # FDR level for the multiple-testing family
+
+hr_min      <- 0.75  # minimal relevant hazard ratio
+delta_min_t <- 0.30  # standardised mean difference for CD4/CD8 change
+omega_min   <- 0.50  # working conditional odds ratio for the BCG analysis
+```
+## ACTG 175 data, treatment arms, and endpoints {#sec-case-study-data}
+
+The package records treatment in two variables. `treat` compares zidovudine alone with the other three groups combined. `arms` retains the four original groups. Here, `0` is zidovudine alone, `1` zidovudine plus didanosine, `2` zidovudine plus zalcitabine, and `3` didanosine alone. The binary coding is used for the pooled comparisons, while the four-arm coding is used for the eBH analysis.
+
+```{r}
+#| label: load-actg175
+#| message: false
+#| warning: false
+
+library(speff2trial)
+library(survival)
+library(dplyr)
+
+data(ACTG175, package = "speff2trial")
+
+actg <- ACTG175 |>
+  mutate(
+    treatment_binary = factor(
+      treat,
+      levels = c(0, 1),
+      labels = c("ZDV only", "Other therapy")
+    ),
+    arm = factor(
+      arms,
+      levels = c(0, 1, 2, 3),
+      labels = c("ZDV", "ZDV + ddI", "ZDV + ddC", "ddI")
+    ),
+    cd4_change_20 = cd420 - cd40,
+    cd8_change_20 = cd820 - cd80
+  )
+
+actg_n <- nrow(actg)
+original_trial_n <- 2467L
+
+actg_n_fmt <- format(actg_n, big.mark = ",")
+original_trial_n_fmt <- format(original_trial_n, big.mark = ",")
+```
+
+The package dataset contains `r actg_n_fmt` participants, compared with `r original_trial_n_fmt` in the original publication [@hammer1996trial]. The package documentation does not explain which participants were omitted, so the results below apply to the available package sample. A causal interpretation also requires that these omissions did not introduce post-randomisation bias.
+
+```{r}
+#| label: actg-treatment-check
+#| echo: false
+
+knitr::kable(
+  with(actg, table(treatment_binary, arm)),
+  caption = "Relationship between the binary and four-arm treatment variables."
+)
+```
+
+The table confirms that `treat` places zidovudine alone in the reference group and combines the other three arms as `Other therapy`.
+
+The survival endpoint is represented by `Surv(days, cens)`. The `speff2trial` documentation defines `days` as the time to a decline in CD4 count of at least 50%, progression to AIDS, or death [@speff2trial]. This corresponds to the percentage-based composite endpoint reported for ACTG 175 [@hammer1996trial]. The analyses therefore apply the endpoint encoded in the package to the reduced package sample, rather than reproducing the full published analysis.
+
+The continuous endpoints are the changes in CD4 and CD8 count between baseline and the week-20 assessment window, documented in the package as 20 ± 5 weeks.
+
+For the binary comparison, the composite endpoint is evaluated at 96 weeks. Patients who experience an event by that time have a known event outcome. Patients followed for at least 96 weeks without an earlier event have a known event-free outcome. Patients censored before 96 weeks have unknown status and are excluded.
+
+```{r}
+#| label: actg-fixed-horizon-endpoint
+
+t0 <- 96 * 7
+
+actg <- actg |>
+  mutate(
+    event_by_t0 = cens == 1 & days <= t0,
+    event_free_t0 = case_when(
+      event_by_t0 ~ FALSE,
+      days >= t0 ~ TRUE,
+      TRUE ~ NA
+    ),
+    known_status_t0 = !is.na(event_free_t0)
+  )
+
+actg_bin <- actg |>
+  filter(known_status_t0)
+
+n_known_t0 <- nrow(actg_bin)
+n_unknown_t0 <- sum(!actg$known_status_t0)
+n_event_t0 <- sum(!actg_bin$event_free_t0)
+n_event_free_t0 <- sum(actg_bin$event_free_t0)
+```
+
+Status at 96 weeks is known for `r format(n_known_t0, big.mark = ",")` participants. Of these, `r n_event_t0` experienced the composite event and `r format(n_event_free_t0, big.mark = ",")` were event-free. The remaining `r n_unknown_t0` participants were censored before 96 weeks. The fixed-horizon analysis is therefore restricted to participants with known status. Its interpretation depends on this exclusion not distorting the treatment comparison.
+
+## Main survival analysis with safe and classical logrank tests {#sec-case-study-logrank}
+
+The survival analysis compares the time to the composite event between `Other therapy` and `ZDV only`. Because the event is unfavourable, a hazard ratio below one favours `Other therapy`. Let $\mathrm{HR}$ denote this hazard ratio. The one-sided hypotheses are
+
+$$
+H_0 : \mathrm{HR} \geq 1
+\qquad \text{against} \qquad
+H_1 : \mathrm{HR} < 1.
+$$
+
+The value $\mathrm{HR}_{\min} =$ `r hr_min` is the design alternative used for power planning. It is not the boundary of the alternative hypothesis and is not estimated from the ACTG data. The design targets level `r alpha_single` and power `r 1 - beta_design` at $\mathrm{HR}=\mathrm{HR}_{\min}$.
+
+```{r}
+#| label: design-safe-logrank-actg
+#| cache: true
+#| results: hide
+#| message: false
+#| warning: false
+
+n_zdv <- sum(actg$treatment_binary == "ZDV only")
+n_other <- sum(actg$treatment_binary == "Other therapy")
+
+set.seed(2026)
+
+invisible(capture.output({
+  design_lr <- safestats::designSafeLogrank(
+    hrMin = hr_min,
+    beta = beta_design,
+    alpha = alpha_single,
+    alternative = "less",
+    exact = TRUE,
+    m0 = n_zdv,
+    m1 = n_other,
+    pb = FALSE
+  )
+
+  safe_lr <- safestats::safeLogrankTest(
+    survival::Surv(days, cens) ~ treatment_binary,
+    data = actg,
+    designObj = design_lr,
+    exact = TRUE
+  )
+}))
+
+safe_e_value <- unname(safe_lr$eValue)
+safe_n_events <- sum(actg$cens == 1, na.rm = TRUE)
+```
+
+The safe test uses the observed group sizes and the design values above. At level `r alpha_single`, rejection requires an e-value of at least `r 1 / alpha_single`.
+
+As in @sec-safe-logrank, the safe guarantee is relative to the conditional risk-set model and censoring assumptions used by the exact logrank construction. The analysis here is unstratified; the recorded `strat` variable is used only in the permutation diagnostic below.
+
+For comparison, the classical logrank test is applied to the same endpoint and treatment contrast. It tests for a difference in the survival curves but does not provide an effect estimate. A Cox proportional hazards model is therefore also fitted to estimate the hazard ratio and its fixed-sample confidence interval. With `ZDV only` as the reference group, values below one favour `Other therapy`. The hazard-ratio estimate and its confidence interval rely on the proportional-hazards assumption.
+
+```{r}
+#| label: classical-logrank-cox-actg
+#| message: false
+#| warning: false
+
+classical_lr <- survival::survdiff(
+  survival::Surv(days, cens) ~ treatment_binary,
+  data = actg
+)
+
+one_sided_logrank_p <- function(fit, beneficial_group) {
+  idx <- grep(beneficial_group, names(fit$n), fixed = TRUE)
+  observed <- as.numeric(fit$obs)
+  expected <- as.numeric(fit$exp)
+  variance <- unname(fit$var[idx, idx])
+  z <- (observed[idx] - expected[idx]) / sqrt(variance)
+
+  stats::pnorm(z)
+}
+
+classical_lr_p <- one_sided_logrank_p(
+  classical_lr,
+  beneficial_group = "Other therapy"
+)
+
+cox_lr <- survival::coxph(
+  survival::Surv(days, cens) ~ treatment_binary,
+  data = actg
+)
+```
+
+```{r}
+#| label: classical-logrank-cox-fmt
+#| include: false
+
+cox_summary <- summary(cox_lr)
+cox_term <- grep(
+  "Other therapy",
+  rownames(cox_summary$conf.int),
+  fixed = TRUE
+)
+
+cox_hr <- unname(cox_summary$conf.int[cox_term, "exp(coef)"])
+cox_ci_lower <- unname(cox_summary$conf.int[cox_term, "lower .95"])
+cox_ci_upper <- unname(cox_summary$conf.int[cox_term, "upper .95"])
+
+safe_threshold <- 1 / alpha_single
+
+fmt_number <- function(x, digits = 4) {
+  format(signif(x, digits), scientific = FALSE, trim = TRUE)
+}
+
+fmt_evalue <- function(x, digits = 4) {
+  if (is.finite(x) && (x >= 1e4 || (x > 0 && x < 1e-3))) {
+    formatC(x, format = "e", digits = 2)
+  } else {
+    fmt_number(x, digits = digits)
+  }
+}
+
+alpha_single_fmt <- fmt_number(alpha_single, digits = 3)
+
+classical_lr_p_fmt <- format.pval(
+  classical_lr_p,
+  digits = 3,
+  eps = 0.001
+)
+
+safe_e_value_fmt <- fmt_evalue(safe_e_value)
+safe_threshold_fmt <- fmt_number(safe_threshold)
+
+cox_hr_fmt <- sprintf("%.3f", cox_hr)
+cox_ci_lower_fmt <- sprintf("%.3f", cox_ci_lower)
+cox_ci_upper_fmt <- sprintf("%.3f", cox_ci_upper)
+
+cox_ci_fmt <- sprintf(
+  "%s (%s, %s)",
+  cox_hr_fmt,
+  cox_ci_lower_fmt,
+  cox_ci_upper_fmt
+)
+```
+
+The Kaplan--Meier estimator, the standard nonparametric estimator of the event-free probability under right-censoring, retains each participant in the risk set until their event or censoring time. Each downward step corresponds to one or more observed composite events. @fig-actg-km shows the estimated event-free probability over follow-up in the two groups. The curves describe the same comparison as the tests and are not used as an additional test.
+
+```{r}
+#| label: fig-actg-km
+#| fig-cap: "Kaplan--Meier curves for the ACTG 175 composite endpoint."
+#| fig-pos: "H"
+#| echo: false
+#| message: false
+#| warning: false
+
+km_fit <- survival::survfit(
+  survival::Surv(days, cens) ~ treatment_binary,
+  data = actg
+)
+
+km_counts <- km_fit$strata
+km_groups <- sub("^treatment_binary=", "", names(km_counts))
+
+km_df <- data.frame(
+  time = km_fit$time,
+  survival = km_fit$surv,
+  group = rep(km_groups, km_counts)
+)
+
+km_df <- dplyr::bind_rows(
+  data.frame(
+    time = rep(0, length(km_groups)),
+    survival = rep(1, length(km_groups)),
+    group = km_groups
+  ),
+  km_df
+) |>
+  dplyr::arrange(group, time)
+
+ggplot2::ggplot(
+  km_df,
+  ggplot2::aes(
+    x = time,
+    y = survival,
+    group = group,
+    linetype = group
+  )
+) +
+  ggplot2::geom_step(linewidth = 0.7) +
+  ggplot2::labs(
+    x = "Days since randomisation",
+    y = "Estimated event-free probability",
+    linetype = "Treatment group"
+  ) +
+  ggplot2::theme_minimal(base_size = 12)
+```
+
+```{r}
+#| label: tbl-actg-logrank-single-look
+#| tbl-cap: "Survival analysis comparing the combined active-treatment arms with zidovudine alone. The safe e-value threshold is $1/\\alpha$."
+#| echo: false
+
+logrank_table <- data.frame(
+  `One-sided logrank p-value` = classical_lr_p_fmt,
+  `Cox HR (95% CI)` = cox_ci_fmt,
+  `Safe e-value` = safe_e_value_fmt,
+  Events = safe_n_events,
+  check.names = FALSE
+)
+
+knitr::kable(logrank_table)
+```
+
+@tbl-actg-logrank-single-look summarises the single-look survival results.
+
+The analysis includes `r safe_n_events` composite events. The estimated hazard ratio of `Other therapy` relative to `ZDV only` is `r cox_hr_fmt` (95% CI `r cox_ci_lower_fmt` to `r cox_ci_upper_fmt`), so the estimated event hazard is lower in the combined active-treatment group. The one-sided logrank p-value is `r classical_lr_p_fmt`. The safe e-value is `r safe_e_value_fmt`, compared with the threshold `r safe_threshold_fmt`. 
+
+## Monitoring the safe logrank with optional stopping {#sec-case-study-monitoring}
+
+The same safe logrank e-process is replayed over the ordered distinct event times to examine repeated monitoring. This retrospective replay does not reconstruct the trial's historical monitoring.
+
+`safeLogrankTest()` returns one log-evidence contribution for each distinct event time, with tied events at the same time handled within the same update. Cumulating these contributions gives the log e-process, and exponentiating gives the e-value after each update [@turner2022safestats].
+
+```{r}
+#| label: extract-safe-logrank-path
+#| message: false
+#| warning: false
+
+extract_log_e_path <- function(safe_obj) {
+  cumsum(safe_obj$sumStats$logEValueLess)
+}
+
+safe_log_e_path <- extract_log_e_path(safe_lr)
+safe_event_times <- safe_lr$sumStats$stopTimeVector
+
+safe_monitor_path <- data.frame(
+  update_index = seq_along(safe_log_e_path),
+  event_time = safe_event_times,
+  log_e_value = safe_log_e_path,
+  e_value = exp(safe_log_e_path)
+)
+```
+
+At level $\alpha$, the safe rule rejects when the e-process first reaches $1/\alpha$.
+
+```{r}
+#| label: safe-logrank-stopping-time
+
+safe_crossing_updates <- which(
+  safe_monitor_path$log_e_value >= log(1 / alpha_single)
+)
+
+safe_crosses <- length(safe_crossing_updates) > 0L
+```
+
+```{r}
+#| label: safe-logrank-stopping-text
+#| include: false
+
+safe_crossing_update <- if (safe_crosses) {
+  safe_crossing_updates[1]
+} else {
+  NA_integer_
+}
+
+safe_crossing_day <- if (safe_crosses) {
+  safe_monitor_path$event_time[safe_crossing_update]
+} else {
+  NA_real_
+}
+
+safe_crossing_text <- if (safe_crosses) {
+  paste0(
+    "crosses the threshold after evidence update ",
+    safe_crossing_update,
+    " (day ",
+    fmt_number(safe_crossing_day),
+    ")"
+  )
+} else {
+  "does not cross the threshold"
+}
+
+safe_final_e_monitor_fmt <- fmt_evalue(
+  tail(safe_monitor_path$e_value, 1)
+)
+```
+
+The safe logrank path `r safe_crossing_text` and ends at e-value `r safe_final_e_monitor_fmt`. This crossing is specific to the observed data. The type-I error guarantee follows from the e-process property and Ville's inequality.
+
+For comparison, a classical one-sided logrank test is recomputed at 30 interim times. At time $\tau_j$, follow-up is administratively censored at $\tau_j$, so only events observed by then enter the test.
+
+```{r}
+#| label: naive-logrank-look-path
+#| cache: true
+#| message: false
+#| warning: false
+
+event_times <- sort(unique(actg$days[actg$cens == 1]))
+n_monitor_looks <- min(30L, length(event_times))
+
+look_indices <- unique(round(
+  seq(1, length(event_times), length.out = n_monitor_looks)
+))
+
+look_times <- event_times[look_indices]
+
+classical_logrank_p_at <- function(data, tau) {
+  data_tau <- data |>
+    dplyr::mutate(
+      time_tau = pmin(days, tau),
+      event_tau = cens == 1 & days <= tau
+    )
+
+  lr_tau <- survival::survdiff(
+    survival::Surv(time_tau, event_tau) ~ treatment_binary,
+    data = data_tau
+  )
+
+  one_sided_logrank_p(
+    lr_tau,
+    beneficial_group = "Other therapy"
+  )
+}
+
+naive_look_path <- data.frame(
+  look_index = seq_along(look_times),
+  event_time = look_times,
+  p_value = vapply(
+    look_times,
+    function(tau) classical_logrank_p_at(actg, tau),
+    numeric(1)
+  )
+)
+
+naive_crossing_indices <- which(
+  naive_look_path$p_value <= alpha_single
+)
+
+naive_crosses <- length(naive_crossing_indices) > 0L
+```
+
+```{r}
+#| label: naive-logrank-crossing-text
+#| include: false
+
+naive_crossing_index <- if (naive_crosses) {
+  naive_crossing_indices[1]
+} else {
+  NA_integer_
+}
+
+naive_crossing_look <- if (naive_crosses) {
+  naive_look_path$look_index[naive_crossing_index]
+} else {
+  NA_integer_
+}
+
+naive_crossing_day <- if (naive_crosses) {
+  naive_look_path$event_time[naive_crossing_index]
+} else {
+  NA_real_
+}
+
+naive_crossing_p <- if (naive_crosses) {
+  naive_look_path$p_value[naive_crossing_index]
+} else {
+  NA_real_
+}
+
+naive_crossing_text <- if (naive_crosses) {
+  paste0(
+    "first falls below alpha at look ",
+    naive_crossing_look,
+    " (day ",
+    fmt_number(naive_crossing_day),
+    ", p = ",
+    format.pval(naive_crossing_p, digits = 3, eps = 0.001),
+    ")"
+  )
+} else {
+  "does not fall below alpha"
+}
+```
+
+The classical p-value `r naive_crossing_text`. This crossing does not show type-I error inflation because the treatment effect may be real. The null simulation below addresses inflation.
+
+@fig-actg-monitoring-paths shows the log e-value and $-\log_{10}(p)$. Smaller p-values appear higher in the lower panel, and the first classical crossing is marked. The classical looks are spaced over ordered event times rather than calendar days, which explains the uneven horizontal spacing.
+
+```{r}
+#| label: fig-actg-monitoring-paths
+#| fig-cap: "Monitoring paths for the ACTG 175 survival endpoint. The upper panel shows the safe log e-value and the lower panel shows the unadjusted repeated p-values on a negative log10 scale. The first classical crossing of the nominal threshold is marked."
+#| fig-pos: "H"
+#| echo: false
+#| message: false
+#| warning: false
+
+monitor_plot_df <- dplyr::bind_rows(
+  data.frame(
+    panel = "Safe log e-value",
+    event_time = safe_monitor_path$event_time,
+    value = safe_monitor_path$log_e_value
+  ),
+  data.frame(
+    panel = "Unadjusted repeated p-value (-log10 scale)",
+    event_time = naive_look_path$event_time,
+    value = -log10(pmax(
+      naive_look_path$p_value,
+      .Machine$double.xmin
+    ))
+  )
+)
+
+monitor_plot_df$panel <- factor(
+  monitor_plot_df$panel,
+  levels = c(
+    "Safe log e-value",
+    "Unadjusted repeated p-value (-log10 scale)"
+  )
+)
+
+monitor_thresholds <- data.frame(
+  panel = factor(
+    c(
+      "Safe log e-value",
+      "Unadjusted repeated p-value (-log10 scale)"
+    ),
+    levels = levels(monitor_plot_df$panel)
+  ),
+  threshold = c(
+    log(1 / alpha_single),
+    -log10(alpha_single)
+  )
+)
+
+crossing_marker <- if (naive_crosses) {
+  data.frame(
+    panel = factor(
+      "Unadjusted repeated p-value (-log10 scale)",
+      levels = levels(monitor_plot_df$panel)
+    ),
+    event_time = naive_crossing_day,
+    value = -log10(pmax(
+      naive_crossing_p,
+      .Machine$double.xmin
+    )),
+    label = paste0("Look ", naive_crossing_look)
+  )
+} else {
+  data.frame(
+    panel = factor(
+      character(),
+      levels = levels(monitor_plot_df$panel)
+    ),
+    event_time = numeric(),
+    value = numeric(),
+    label = character()
+  )
+}
+
+ggplot2::ggplot(
+  monitor_plot_df,
+  ggplot2::aes(x = event_time, y = value)
+) +
+  ggplot2::geom_line(linewidth = 0.7) +
+  ggplot2::geom_point(
+    data = subset(
+      monitor_plot_df,
+      panel == "Unadjusted repeated p-value (-log10 scale)"
+    ),
+    size = 1.2
+  ) +
+  ggplot2::geom_hline(
+    data = monitor_thresholds,
+    ggplot2::aes(yintercept = threshold),
+    linetype = "dashed"
+  ) +
+  ggplot2::geom_point(
+    data = crossing_marker,
+    ggplot2::aes(x = event_time, y = value),
+    inherit.aes = FALSE,
+    shape = 1,
+    size = 3.2,
+    stroke = 1
+  ) +
+  ggplot2::geom_text(
+    data = crossing_marker,
+    ggplot2::aes(
+      x = event_time,
+      y = value,
+      label = label
+    ),
+    inherit.aes = FALSE,
+    nudge_x = 25,
+    nudge_y = 0.45,
+    hjust = 0,
+    size = 3
+  ) +
+  ggplot2::facet_wrap(~panel, scales = "free_y", ncol = 1) +
+  ggplot2::labs(
+    x = "Days since randomisation",
+    y = NULL
+  ) +
+  ggplot2::theme_minimal(base_size = 12)
+```
+
+To compare the two monitoring rules under the null, treatment labels are permuted within the recorded `strat` groups. This preserves the treatment counts within each stratum while removing the treatment--outcome association. For each permutation, the safe rule rejects if the e-process ever reaches $1/\alpha$, and the unadjusted rule rejects if any interim p-value is at most $\alpha$.
+
+```{r}
+#| label: monitoring-randomisation-simulation
+#| cache: true
+#| echo: false
+#| message: false
+#| warning: false
+
+set.seed(2026)
+
+B_monitor <- 250L
+
+permute_treatment_within_strat <- function(data) {
+  data |>
+    dplyr::group_by(strat) |>
+    dplyr::mutate(
+      treatment_binary = sample(treatment_binary)
+    ) |>
+    dplyr::ungroup()
+}
+
+safe_ever_reject <- function(data) {
+  invisible(capture.output({
+    safe_perm <- safestats::safeLogrankTest(
+      survival::Surv(days, cens) ~ treatment_binary,
+      data = data,
+      designObj = design_lr,
+      exact = TRUE
+    )
+  }))
+
+  log_path_perm <- extract_log_e_path(safe_perm)
+  max(log_path_perm) >= log(1 / alpha_single)
+}
+
+naive_ever_reject <- function(data) {
+  p_values <- vapply(
+    look_times,
+    function(tau) classical_logrank_p_at(data, tau),
+    numeric(1)
+  )
+
+  any(p_values <= alpha_single)
+}
+
+monitor_sim_results <- replicate(
+  B_monitor,
+  {
+    perm_data <- permute_treatment_within_strat(actg)
+
+    data.frame(
+      safe_reject = safe_ever_reject(perm_data),
+      naive_reject = naive_ever_reject(perm_data)
+    )
+  },
+  simplify = FALSE
+) |>
+  dplyr::bind_rows()
+
+safe_reject_count <- sum(monitor_sim_results$safe_reject)
+naive_reject_count <- sum(monitor_sim_results$naive_reject)
+
+safe_type1_hat <- safe_reject_count / B_monitor
+naive_type1_hat <- naive_reject_count / B_monitor
+
+safe_type1_se <- sqrt(
+  safe_type1_hat * (1 - safe_type1_hat) / B_monitor
+)
+
+naive_type1_se <- sqrt(
+  naive_type1_hat * (1 - naive_type1_hat) / B_monitor
+)
+
+safe_type1_hat_fmt <- fmt_number(safe_type1_hat, digits = 3)
+naive_type1_hat_fmt <- fmt_number(naive_type1_hat, digits = 3)
+safe_type1_se_fmt <- fmt_number(safe_type1_se, digits = 3)
+naive_type1_se_fmt <- fmt_number(naive_type1_se, digits = 3)
+
+safe_reject_count_fmt <- as.character(safe_reject_count)
+naive_reject_count_fmt <- as.character(naive_reject_count)
+B_monitor_fmt <- as.character(B_monitor)
+```
+
+Across `r B_monitor_fmt` permutations, the safe rule rejected in `r safe_reject_count_fmt` cases (`r safe_type1_hat_fmt`, Monte Carlo standard error `r safe_type1_se_fmt`), whereas the unadjusted repeated-logrank procedure rejected in `r naive_reject_count_fmt` cases (`r naive_type1_hat_fmt`, standard error `r naive_type1_se_fmt`). The safe estimate is consistent with the nominal level $\alpha = `r alpha_single_fmt`$. The much higher rejection rate of the repeated-logrank procedure illustrates the type-I error inflation caused by testing at multiple interim looks without adjustment. These estimates are conditional on the observed event and censoring pattern, the chosen monitoring schedule, and the within-`strat` permutation scheme. The calculation is a conditional permutation diagnostic rather than a reconstruction of the trial's historical randomisation or monitoring protocol.
+
+
+## Safe t-tests for CD4 and CD8 change {#sec-case-study-ttest}
+
+ACTG 175 records CD4 and CD8 counts at baseline and in a 20 ± 5 week assessment window. We analyse the change from baseline in each count, comparing `Other therapy` with `ZDV only`.
+
+For CD4, a larger increase indicates a better immune response. The one-sided alternative is therefore that the mean CD4 change is greater under `Other therapy`. The design uses `r delta_min_t` as the minimum relevant standardised effect, while the estimated difference is reported on the original cell-count scale.
+
+CD8 change is analysed in the same direction, although its clinical interpretation is less direct than that of CD4 change. It is treated as a secondary outcome.
+
+Both analyses use an independent two-sample Gaussian model with a common variance. Participants with a missing week-20 measurement are omitted separately for each endpoint, so the two analyses may contain different patients.
+
+```{r}
+#| label: prepare-actg-t-endpoints
+#| message: false
+#| warning: false
+
+make_t_endpoint <- function(data, variable) {
+  endpoint_data <- data.frame(
+    treatment_binary = data$treatment_binary,
+    value = data[[variable]]
+  )
+
+  endpoint_data <- endpoint_data[
+    !is.na(endpoint_data$value) & !is.na(endpoint_data$treatment_binary),
+    ,
+    drop = FALSE
+  ]
+
+  x <- endpoint_data$value[endpoint_data$treatment_binary == "Other therapy"]
+  y <- endpoint_data$value[endpoint_data$treatment_binary == "ZDV only"]
+
+  list(
+    x = x,
+    y = y,
+    n_total = length(x) + length(y),
+    mean_difference = mean(x) - mean(y)
+  )
+}
+
+cd4_t_data <- make_t_endpoint(actg, "cd4_change_20")
+cd8_t_data <- make_t_endpoint(actg, "cd8_change_20")
+
+cd4_mean_diff_fmt <- fmt_number(cd4_t_data$mean_difference)
+cd8_mean_diff_fmt <- fmt_number(cd8_t_data$mean_difference)
+cd4_n_fmt <- format(cd4_t_data$n_total, big.mark = ",")
+cd8_n_fmt <- format(cd8_t_data$n_total, big.mark = ",")
+```
+
+After excluding missing measurements, the CD4 analysis includes `r cd4_n_fmt` patients and the estimated mean difference, calculated as `Other therapy` minus `ZDV only`, is `r cd4_mean_diff_fmt` cells per cubic millimetre. The CD8 analysis includes `r cd8_n_fmt` patients and gives a mean difference of `r cd8_mean_diff_fmt` cells per cubic millimetre. Positive differences favour `Other therapy` under the chosen one-sided alternatives.
+
+The same safe t-test design is used for both endpoints, with level `r alpha_single`, target power `r fmt_number(1 - beta_design)`, and minimum relevant standardised effect `r delta_min_t`. The planning calculation assumes equal group sizes. The tests use the observed group sizes.
+
+```{r}
+#| label: design-and-run-safe-t-actg
+#| cache: true
+#| message: false
+#| warning: false
+
+design_t <- safestats::designSafeT(
+  deltaMin = delta_min_t,
+  alpha = alpha_single,
+  beta = beta_design,
+  alternative = "greater",
+  testType = "twoSample",
+  ratio = 1,
+  seed = 2026,
+  pb = FALSE
+)
+
+safe_cd4 <- safestats::safeTTest(
+  x = cd4_t_data$x,
+  y = cd4_t_data$y,
+  designObj = design_t,
+  varEqual = TRUE,
+  ciValue = 1 - alpha_single
+)
+
+safe_cd8 <- safestats::safeTTest(
+  x = cd8_t_data$x,
+  y = cd8_t_data$y,
+  designObj = design_t,
+  varEqual = TRUE,
+  ciValue = 1 - alpha_single
+)
+```
+
+For each endpoint, the safe test returns an e-value and an anytime-valid interval. The classical comparison uses a one-sided pooled t-test and a fixed-sample two-sided interval. The week 20 measurements have no reliable accrual order, so only the final safe interval is reported.
+
+```{r}
+#| label: extract-safe-t-results
+#| echo: false
+#| message: false
+#| warning: false
+
+safe_cd4_ci <- unname(safe_cd4$confSeq)
+safe_cd8_ci <- unname(safe_cd8$confSeq)
+
+format_bound <- function(x) {
+  if (is.infinite(x)) {
+    return(if (x < 0) "-Inf" else "Inf")
+  }
+
+  fmt_number(x)
+}
+
+format_interval <- function(x) {
+  paste0(
+    "[",
+    format_bound(x[1]),
+    ", ",
+    format_bound(x[2]),
+    "]"
+  )
+}
+
+classical_cd4 <- stats::t.test(
+  cd4_t_data$x,
+  cd4_t_data$y,
+  alternative = "greater",
+  var.equal = TRUE
+)
+
+classical_cd8 <- stats::t.test(
+  cd8_t_data$x,
+  cd8_t_data$y,
+  alternative = "greater",
+  var.equal = TRUE
+)
+
+classical_cd4_ci <- stats::t.test(
+  cd4_t_data$x,
+  cd4_t_data$y,
+  alternative = "two.sided",
+  var.equal = TRUE,
+  conf.level = 1 - alpha_single
+)$conf.int
+
+classical_cd8_ci <- stats::t.test(
+  cd8_t_data$x,
+  cd8_t_data$y,
+  alternative = "two.sided",
+  var.equal = TRUE,
+  conf.level = 1 - alpha_single
+)$conf.int
+
+safe_cd4_e <- unname(safe_cd4$eValue)
+safe_cd8_e <- unname(safe_cd8$eValue)
+safe_t_threshold <- 1 / alpha_single
+
+safe_cd4_e_fmt <- fmt_evalue(safe_cd4_e)
+safe_cd8_e_fmt <- fmt_evalue(safe_cd8_e)
+safe_t_threshold_fmt <- fmt_number(safe_t_threshold)
+
+safe_cd4_ci_fmt <- format_interval(safe_cd4_ci)
+safe_cd8_ci_fmt <- format_interval(safe_cd8_ci)
+
+classical_cd4_p_fmt <- format.pval(
+  classical_cd4$p.value,
+  digits = 3,
+  eps = 0.001
+)
+
+classical_cd8_p_fmt <- format.pval(
+  classical_cd8$p.value,
+  digits = 3,
+  eps = 0.001
+)
+
+classical_cd4_ci_fmt <- format_interval(classical_cd4_ci)
+classical_cd8_ci_fmt <- format_interval(classical_cd8_ci)
+```
+
+@tbl-actg-safe-t compares the safe e-values with $1/\alpha$ and the classical p-values with $\alpha$. The interval columns report the difference in mean cell-count change.
+
+```{r}
+#| label: tbl-actg-safe-t
+#| tbl-cap: "Safe and classical t-test summaries for 20-week CD4 and CD8 change. The safe e-value threshold is $1/\\alpha$."
+#| echo: false
+
+ttest_table <- data.frame(
+  Endpoint = c("CD4 change at 20 weeks", "CD8 change at 20 weeks"),
+  `Analysed n` = c(cd4_n_fmt, cd8_n_fmt),
+  `Safe e-value` = c(safe_cd4_e_fmt, safe_cd8_e_fmt),
+  `Safe anytime-valid interval` = c(safe_cd4_ci_fmt, safe_cd8_ci_fmt),
+  `Classical p-value` = c(classical_cd4_p_fmt, classical_cd8_p_fmt),
+  `Classical interval` = c(classical_cd4_ci_fmt, classical_cd8_ci_fmt),
+  check.names = FALSE
+)
+
+kableExtra::kbl(
+  ttest_table,
+  booktabs = TRUE,
+  align = "lrrrrr"
+) |>
+  kableExtra::kable_styling(
+    latex_options = c("HOLD_position", "scale_down")
+  )
+```
+
+For CD4 change, the safe e-value is `r safe_cd4_e_fmt` and the classical one-sided p-value is `r classical_cd4_p_fmt`. For CD8 change, the corresponding values are `r safe_cd8_e_fmt` and `r classical_cd8_p_fmt`.
+
+
+## Event-free status at 96 weeks {#sec-case-study-binary}
+
+The survival outcome can also be summarised at a fixed time. At 96 weeks, the question is whether a participant remained free of the composite event. The analysis includes only participants whose status at that time is known, as defined in @sec-case-study-data.
+
+This endpoint is analysed with a classical two-proportions test rather than the safe two-proportions test introduced in @sec-safe-2x2. ACTG 175 supplies one retrospectively constructed fixed-horizon table among participants with known 96-week status, not a prespecified stream of complete blocks. We therefore do not retrofit a safe block design after observing the follow-up and censoring structure.
+
+The one-sided comparison tests whether the event-free probability is larger under `Other therapy` than under `ZDV only`. A two-sided fixed-sample confidence interval is reported for the risk difference
+$$
+p_{\text{Other therapy}}-p_{\text{ZDV only}}.
+$$
+Both calculations use the uncorrected normal approximation.
+
+```{r}
+#| label: actg-binary-classical
+#| message: false
+#| warning: false
+
+bin_a <- actg_bin |>
+  dplyr::filter(treatment_binary == "ZDV only")
+
+bin_b <- actg_bin |>
+  dplyr::filter(treatment_binary == "Other therapy")
+
+na_bin <- nrow(bin_a)
+nb_bin <- nrow(bin_b)
+
+ya_bin <- as.integer(sum(bin_a$event_free_t0))
+yb_bin <- as.integer(sum(bin_b$event_free_t0))
+
+event_a_bin <- na_bin - ya_bin
+event_b_bin <- nb_bin - yb_bin
+
+pa_hat <- ya_bin / na_bin
+pb_hat <- yb_bin / nb_bin
+risk_diff_hat <- pb_hat - pa_hat
+
+classical_bin_p <- stats::prop.test(
+  x = c(yb_bin, ya_bin),
+  n = c(nb_bin, na_bin),
+  alternative = "greater",
+  correct = FALSE
+)
+
+classical_bin_ci <- stats::prop.test(
+  x = c(yb_bin, ya_bin),
+  n = c(nb_bin, na_bin),
+  alternative = "two.sided",
+  conf.level = 1 - alpha_single,
+  correct = FALSE
+)
+```
+
+```{r}
+#| label: actg-binary-classical-fmt
+#| include: false
+
+pa_hat_fmt <- fmt_number(pa_hat)
+pb_hat_fmt <- fmt_number(pb_hat)
+risk_diff_hat_fmt <- fmt_number(risk_diff_hat)
+
+classical_bin_p_fmt <- format.pval(
+  classical_bin_p$p.value,
+  digits = 3,
+  eps = 0.001
+)
+
+classical_bin_ci_fmt <- format_interval(
+  classical_bin_ci$conf.int
+)
+```
+
+```{r}
+#| label: tbl-actg-binary
+#| tbl-cap: "Event-free status at 96 weeks by treatment group."
+#| echo: false
+
+binary_counts_table <- data.frame(
+  Treatment = c("ZDV only", "Other therapy"),
+  `Event-free` = c(ya_bin, yb_bin),
+  `Event by 96 weeks` = c(event_a_bin, event_b_bin),
+  Total = c(na_bin, nb_bin),
+  `Event-free proportion` = c(pa_hat_fmt, pb_hat_fmt),
+  check.names = FALSE
+)
+
+knitr::kable(binary_counts_table)
+```
+
+@tbl-actg-binary shows the event-free counts and proportions at 96 weeks.
+
+The event-free proportions are `r pa_hat_fmt` under `ZDV only` and `r pb_hat_fmt` under `Other therapy`, giving an estimated risk difference of `r risk_diff_hat_fmt`. The classical one-sided p-value is `r classical_bin_p_fmt`, read against $\alpha=`r alpha_single_fmt`$. The two-sided confidence interval for the risk difference is `r classical_bin_ci_fmt`.
+
+The binary endpoint is not included in the e-value family analysed in @sec-case-study-fdr.
+
+
+## Arm-specific comparisons with eBH {#sec-case-study-fdr}
+
+The earlier analyses pool all three active treatments into `Other therapy`. The eBH analysis instead treats the active arms separately and controls the false discovery rate across the resulting claims.
+
+The family was defined in advance for this chapter as the nine combinations of three active arms (`ZDV + ddI`, `ZDV + ddC`, and `ddI`) and three endpoints (survival, CD4 change, and CD8 change). Each active arm is compared with `ZDV`. The fixed-horizon binary endpoint is excluded because it uses the pooled `Other therapy` comparison rather than an arm-specific contrast. The CD8 comparisons are included, but their directional interpretation is weaker, as noted in @sec-case-study-ttest.
+
+The nine e-values are dependent because the comparisons share the ZDV group and the endpoints are measured on the same patients. Since the PRDS condition is not established here, we use the arbitrary-dependence guarantee of eBH from @prp-ebh-fdr. The comparison with BH and BY is discussed in @sec-ebh and @sec-beyond-ebh-plus.
+
+For each active arm, the safe logrank and safe t-tests are applied to the comparison with ZDV using the same effect directions as in @sec-case-study-logrank and @sec-case-study-ttest. A hazard ratio below one favours the active arm for survival, while larger CD4 and CD8 changes favour the active arm. The same design alternatives are reused across cells to keep the e-value constructions comparable. The target-power calculations for the pooled comparisons do not apply to the smaller arm-specific contrasts. The resulting nine e-values are then entered into the eBH procedure.
+
+```{r}
+#| label: compute-fdr-family
+#| cache: true
+#| message: false
+#| warning: false
+
+active_arms <- c("ZDV + ddI", "ZDV + ddC", "ddI")
+endpoint_levels <- c(
+  "Composite survival",
+  "CD4 change",
+  "CD8 change"
+)
+
+e_logrank_arm <- function(active) {
+  sub <- actg[actg$arm %in% c("ZDV", active), , drop = FALSE]
+  sub$arm_pair <- factor(as.character(sub$arm), levels = c("ZDV", active))
+
+  fit <- safestats::safeLogrankTest(
+    survival::Surv(days, cens) ~ arm_pair,
+    data = sub,
+    designObj = design_lr,
+    exact = TRUE
+  )
+
+  unname(fit$eValue)
+}
+
+e_ttest_arm <- function(active, outcome) {
+  x <- actg[[outcome]][actg$arm == active]
+  y <- actg[[outcome]][actg$arm == "ZDV"]
+
+  x <- x[!is.na(x)]
+  y <- y[!is.na(y)]
+
+  fit <- safestats::safeTTest(
+    x = x,
+    y = y,
+    designObj = design_t,
+    varEqual = TRUE
+  )
+
+  unname(fit$eValue)
+}
+
+e_for_cell <- function(active, endpoint) {
+  switch(
+    endpoint,
+    "Composite survival" = e_logrank_arm(active),
+    "CD4 change"         = e_ttest_arm(active, "cd4_change_20"),
+    "CD8 change"         = e_ttest_arm(active, "cd8_change_20")
+  )
+}
+
+family <- do.call(rbind, lapply(active_arms, function(active) {
+  data.frame(
+    arm = active,
+    endpoint = endpoint_levels,
+    e_value = vapply(
+      endpoint_levels,
+      function(endpoint) e_for_cell(active, endpoint),
+      numeric(1)
+    ),
+    stringsAsFactors = FALSE
+  )
+}))
+```
+
+The eBH procedure is applied at the FDR level `r alpha_fdr` fixed in @sec-case-study-aim. Writing the ordered e-values as $e_{(1)} \geq \cdots \geq e_{(K)}$, it selects the largest $k$ satisfying
+
+$$
+e_{(k)} \geq \frac{K}{\alpha k}.
+$$
+
+```{r}
+#| label: apply-ebh
+#| message: false
+#| warning: false
+
+ebh <- function(e, alpha) {
+  K <- length(e)
+  ord <- order(e, decreasing = TRUE)
+  crit <- K / (alpha * seq_len(K))
+  passes <- e[ord] >= crit
+  k_star <- max(c(0L, which(passes)))
+
+  reject <- logical(K)
+  reject[ord[seq_len(k_star)]] <- TRUE
+
+  list(
+    reject = reject,
+    k_star = k_star
+  )
+}
+
+K_family <- nrow(family)
+ebh_fit <- ebh(family$e_value, alpha_fdr)
+
+family$pseudo_p <- pmin(1, 1 / family$e_value)
+family$reject <- ebh_fit$reject
+```
+
+```{r}
+#| label: apply-ebh-text
+#| include: false
+
+n_discoveries <- sum(family$reject)
+discovery_text <- if (n_discoveries > 0L) {
+  knitr::combine_words(
+    paste0(
+      family$endpoint[family$reject],
+      " for ",
+      family$arm[family$reject]
+    )
+  )
+} else {
+  "none"
+}
+
+alpha_fdr_fmt <- fmt_number(alpha_fdr)
+n_discoveries_fmt <- as.character(n_discoveries)
+```
+
+@tbl-case-study-fdr reports all nine results, and @fig-case-study-fdr compares the ranked e-values with the eBH boundary.
+
+```{r}
+#| label: tbl-case-study-fdr
+#| tbl-cap: 'Arm-specific e-values and eBH decisions for the nine-hypothesis treatment-arm by endpoint family. Pseudo-p-values are $\min(1,1/e_i)$.'
+#| echo: false
+
+ord_tab <- order(
+  match(family$endpoint, endpoint_levels),
+  match(family$arm, active_arms)
+)
+
+fdr_table <- data.frame(
+  Endpoint = family$endpoint[ord_tab],
+  Arm = family$arm[ord_tab],
+  `Safe e-value` = vapply(
+    family$e_value[ord_tab],
+    fmt_evalue,
+    character(1)
+  ),
+  `Pseudo-p` = vapply(
+    family$pseudo_p[ord_tab],
+    fmt_evalue,
+    character(1)
+  ),
+  Decision = ifelse(
+    family$reject[ord_tab],
+    "Reject",
+    "Do not reject"
+  ),
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+
+kableExtra::kbl(
+  fdr_table,
+  booktabs = TRUE,
+  align = "llrrl"
+) |>
+  kableExtra::kable_styling(
+    latex_options = "HOLD_position"
+  )
+```
+
+```{r}
+#| label: fig-case-study-fdr
+#| fig-cap: "Ranked e-values and the eBH boundary for the nine-hypothesis family. Points up to the last rank satisfying the eBH criterion are rejected."
+#| fig-pos: "H"
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-width: 6
+#| fig-height: 3.6
+
+ebh_plot_df <- data.frame(
+  rank = seq_len(K_family),
+  e_sorted = sort(family$e_value, decreasing = TRUE)
+)
+
+ebh_plot_df$boundary <- K_family / (
+  alpha_fdr * ebh_plot_df$rank
+)
+
+ebh_plot_df$status <- factor(
+  ifelse(
+    ebh_plot_df$rank <= ebh_fit$k_star,
+    "Rejected",
+    "Not rejected"
+  ),
+  levels = c("Rejected", "Not rejected")
+)
+
+ggplot2::ggplot(
+  ebh_plot_df,
+  ggplot2::aes(x = rank)
+) +
+  ggplot2::geom_line(
+    ggplot2::aes(y = boundary),
+    linetype = "dashed",
+    colour = "grey40"
+  ) +
+  ggplot2::geom_point(
+    ggplot2::aes(y = e_sorted, colour = status),
+    size = 2.6
+  ) +
+  ggplot2::scale_y_log10() +
+  ggplot2::scale_x_continuous(
+    breaks = seq_len(K_family)
+  ) +
+  ggplot2::scale_colour_manual(
+    values = c(
+      Rejected = "#1b7837",
+      `Not rejected` = "grey60"
+    ),
+    name = NULL
+  ) +
+  ggplot2::labs(
+    x = "Rank of e-value (largest to smallest)",
+    y = "e-value (log scale)"
+  ) +
+  ggplot2::theme_minimal(base_size = 11) +
+  ggplot2::theme(legend.position = "bottom")
+```
+
+At an FDR level of `r alpha_fdr_fmt`, eBH rejects `r n_discoveries_fmt` of the `r K_family` hypotheses. The rejected hypotheses are `r discovery_text`. This is not a reanalysis of ACTG 175's primary efficacy claims. The nine-hypothesis family was defined for this chapter and does not reproduce the trial's original analysis plan. Any causal interpretation is also subject to the sample-selection and missingness limitations discussed in @sec-case-study-data.
+
+The arm-specific family answers a different question from the pooled comparisons earlier in the chapter. Pooling asks whether the active treatments are beneficial on average relative to ZDV monotherapy, whereas the eBH analysis examines which individual arm--endpoint hypotheses are rejected after multiplicity adjustment. The two analyses therefore need not agree cell by cell.
+
+The e-values are compared directly with the eBH thresholds. The pseudo-p-values $p_i^\ast=\min(1,1/e_i)$ in @tbl-case-study-fdr are used only for the equivalent BH representation of eBH. They are not p-values from the underlying safe tests. Because the nine e-values arise from overlapping comparisons within the same trial, they are combined using eBH rather than multiplied. Multiplication is reserved for the separate-study construction in @sec-case-study-continuation.
+
+
+## Optional continuation with the BCG vaccine studies {#sec-case-study-continuation}
+
+ACTG 175 is a single trial, whereas optional continuation concerns evidence accumulated across separate studies. The BCG data provide controlled studies with distinct participants and completed two-by-two tables, allowing the product construction to be examined across studies.
+
+The data come from the published meta-analysis of @colditz1994bcg and are available as `metadat::dat.bcg` [@metadat]. The studies are shown in publication-year order, with author used to order ties. This is only an approximate chronology because publication year may not match the date at which complete results became available.
+
+```{r}
+#| label: bcg-load
+#| echo: false
+
+bcg <- metadat::dat.bcg |>
+  dplyr::arrange(year, author) |>
+  dplyr::transmute(
+    study = paste0(author, " (", year, ")"),
+    allocation = alloc,
+    tpos,
+    tneg,
+    cpos,
+    cneg
+  )
+```
+
+Each study is summarised by the tuberculosis cases and group sizes among vaccinated participants and controls, together with the reported allocation method. In @tbl-bcg-evalues, an entry such as `4/123` means four tuberculosis cases among 123 participants. The risk ratio is the observed tuberculosis risk in the vaccinated group divided by that in the control group. Values below one favour vaccination, one indicates equal observed risks, and values above one favour control.
+
+For the e-value calculation, each completed two-by-two table is conditioned on its row and column totals. The number of tuberculosis cases among vaccinated participants then follows Fisher's noncentral hypergeometric distribution, indexed by the conditional odds ratio $\omega$. The null $\omega=1$ gives the central hypergeometric distribution. The working alternative $\omega=`r omega_min`$ was fixed in @sec-case-study-aim before the study-level e-values were calculated. It corresponds to lower tuberculosis odds under vaccination.
+
+The study-level e-value is the probability of the observed cell count under $\omega=`r omega_min`$ divided by its probability under $\omega=1$. Under the conditional null, this likelihood ratio has expectation one. Values above one favour the working alternative relative to the null, while values below one favour the null relative to that alternative. The probabilities are computed with `BiasedUrn` [@biasedurn]. The displayed risk ratio is descriptive and is distinct from the conditional odds ratio used in the e-value calculation.
+
+For studies with random allocation, conditioning on the margins also has a randomisation interpretation. For alternate or systematic allocation, validity relies on the conditional model rather than randomisation alone.
+
+```{r}
+#| label: bcg-evalues
+#| echo: false
+
+bcg_evalue <- function(tpos, tneg, cpos, cneg, omega) {
+  cases <- tpos + cpos
+  noncases <- tneg + cneg
+  vaccinated_n <- tpos + tneg
+
+  p_alt <- BiasedUrn::dFNCHypergeo(
+    x = tpos,
+    m1 = cases,
+    m2 = noncases,
+    n = vaccinated_n,
+    odds = omega
+  )
+
+  p_null <- stats::dhyper(
+    x = tpos,
+    m = cases,
+    n = noncases,
+    k = vaccinated_n
+  )
+
+  p_alt / p_null
+}
+
+bcg <- bcg |>
+  dplyr::mutate(
+    idx = dplyr::row_number(),
+    rr = (tpos / (tpos + tneg)) / (cpos / (cpos + cneg)),
+    evalue = mapply(
+      bcg_evalue,
+      tpos,
+      tneg,
+      cpos,
+      cneg,
+      MoreArgs = list(omega = omega_min)
+    ),
+    running = cumprod(evalue)
+  )
+
+last_bcg_index <- nrow(bcg)
+last_bcg_study <- bcg$study[last_bcg_index]
+last_bcg_rr_fmt <- fmt_number(bcg$rr[last_bcg_index])
+last_bcg_e_fmt <- fmt_evalue(bcg$evalue[last_bcg_index])
+last_bcg_before_fmt <- fmt_evalue(bcg$running[last_bcg_index - 1L])
+last_bcg_after_fmt <- fmt_evalue(bcg$running[last_bcg_index])
+```
+
+Assuming independence across studies, the product of the study-level e-variables is a test supermartingale by @prp-product-construction and hence an e-process for the intersection null of no effect in each study by @prp-supermg-eprocess. Extending the sequence requires each new e-variable to remain conditionally valid given the preceding evidence and inclusion history.
+
+The analysis is retrospective. Result-dependent publication or study inclusion could violate conditional validity and create the accumulation bias discussed in the introduction [@terschure2019accumulation; @pawel2024safetestingdiscussion]. The historical sequence therefore does not itself establish that optional-continuation conditions were satisfied.
+
+The e-values in @sec-case-study-fdr arise from overlapping comparisons within one trial and are combined with eBH. The BCG e-values arise from separate studies and are multiplied under the model, independence, and selection assumptions above. After all `r nrow(bcg)` studies, the product is `r fmt_evalue(bcg$running[nrow(bcg)])`, compared with the threshold $1/\alpha = `r fmt_number(1 / alpha_single)`$.
+
+@fig-bcg-continuation traces the running product in approximate publication-year order. Its path depends on the chosen within-year order, although the final product does not. Under the assumptions above, the product may be evaluated after any study without fixing the total number of studies in advance.
+
+The sharp decrease at the final study is caused by `r last_bcg_study`. Its estimated risk ratio is `r last_bcg_rr_fmt`, indicating nearly equal tuberculosis rates in the vaccinated and control groups. That result is much more compatible with the null $\omega=1$ than with the working alternative $\omega=`r omega_min`$, so its study-level e-value is only `r last_bcg_e_fmt`. Multiplying by this value reduces the running product from `r last_bcg_before_fmt` to `r last_bcg_after_fmt`. A running product of e-values need not increase. Evidence that conflicts with the working alternative produces an e-value below one and reduces the accumulated evidence.
+
+```{r}
+#| label: fig-bcg-continuation
+#| echo: false
+#| fig-pos: "H"
+#| fig-cap: "Running product of the BCG study e-values in approximate publication-year order. The dashed line marks $1/\\alpha$. The anytime-valid interpretation is conditional on the modelling, independence, and study-selection assumptions stated in the text."
+ggplot2::ggplot(bcg, ggplot2::aes(x = idx, y = running)) +
+  ggplot2::geom_hline(yintercept = 1 / alpha_single,
+                      linetype = "dashed", colour = "grey40") +
+  ggplot2::geom_line(colour = "steelblue") +
+  ggplot2::geom_point(colour = "steelblue", size = 2) +
+  ggplot2::annotate("text", x = max(bcg$idx), y = 1 / alpha_single,
+                    label = "1/alpha", parse = TRUE,
+                    hjust = 1, vjust = -0.6, size = 3.2, colour = "grey40") +
+  ggplot2::scale_y_log10() +
+  ggplot2::scale_x_continuous(breaks = bcg$idx) +
+  ggplot2::labs(x = "Study (publication-year order)",
+                y = "Accumulated e-value (log scale)") +
+  ggplot2::theme_minimal()
+```
+
+```{r}
+#| label: tbl-bcg-evalues
+#| echo: false
+#| tbl-cap: "BCG study results in approximate publication-year order. TB/$n$ gives the number of tuberculosis cases divided by the group size. The product column is the cumulative product of the study-level e-values."
+tab <- bcg |>
+  dplyr::transmute(
+    study_s = gsub("&", "\\\\&", study),
+    allocation = allocation,
+    vacc = paste0(tpos, "/", tpos + tneg),
+    ctrl = paste0(cpos, "/", cpos + cneg),
+    rr_s = fmt_number(rr),
+    e_s = vapply(evalue, fmt_evalue, character(1)),
+    run_s = vapply(running, fmt_evalue, character(1))
+  )
+
+kableExtra::kbl(
+  tab,
+  escape = FALSE,
+  booktabs = TRUE,
+  align = "llccrrr",
+  col.names = c(
+    "Study",
+    "Allocation",
+    "Vaccinated (TB/$n$)",
+    "Control (TB/$n$)",
+    "Risk ratio",
+    "$e$-value",
+    "Product"
+  )
+) |>
+  kableExtra::kable_styling(
+    latex_options = c("HOLD_position", "scale_down"),
+    font_size = 8.5
+  )
+```
+
+The BCG analysis demonstrates the product construction but is not a new meta-analysis of vaccine efficacy. The null specifies no effect in each study, the studies may be heterogeneous, several did not use random allocation, and the historical publication and inclusion process is not modelled.
+
+
+## Power and stopping behaviour of the safe t-test {#sec-case-study-operating-characteristics}
+
+A simulation estimates the type-I error, power, and stopping sample size of the safe two-sample t-test used in @sec-case-study-ttest.
+
+The simulation follows the Gaussian model used by the test. Both groups have variance one. Their means are equal under the null, while under the alternative the treatment mean is higher by $\delta=`r delta_min_t`$. The safe test is evaluated at ten interim looks between 5 observations per group and its planned sample size. Sampling stops at the first look for which the e-value reaches $1/\alpha$. A conventional fixed-sample two-sample t-test is planned using the same effect size, significance level, and target power. The ten-look schedule is coarser than the monitoring scheme used to determine the safe test's planned sample size, so its simulated power need not equal the design target of 0.8.
+
+```{r}
+#| label: oc-setup
+#| echo: false
+
+n_per_group <- as.integer(ceiling(design_t$nPlan[1]))
+
+fixed_t <- stats::power.t.test(
+  delta = delta_min_t,
+  sd = 1,
+  sig.level = alpha_single,
+  power = 1 - beta_design,
+  type = "two.sample",
+  alternative = "one.sided"
+)
+
+n_fixed_per_group <- as.integer(ceiling(fixed_t$n))
+```
+
+The safe design plans for `r n_per_group` observations per group, compared with `r n_fixed_per_group` for the fixed-sample test.
+
+```{r}
+#| label: oc-simulation
+#| cache: true
+#| echo: false
+#| message: false
+#| warning: false
+
+set.seed(20240608)
+
+threshold <- 1 / alpha_single
+k_min <- 5L
+n_oc_looks <- 10L
+
+looks <- unique(as.integer(round(
+  seq(k_min, n_per_group, length.out = n_oc_looks)
+)))
+
+run_trial <- function(delta) {
+  treatment <- stats::rnorm(
+    n_per_group,
+    mean = delta,
+    sd = 1
+  )
+
+  control <- stats::rnorm(
+    n_per_group,
+    mean = 0,
+    sd = 1
+  )
+
+  e_path <- vapply(
+    looks,
+    function(k) {
+      unname(safestats::safeTTest(
+        x = treatment[seq_len(k)],
+        y = control[seq_len(k)],
+        designObj = design_t,
+        varEqual = TRUE
+      )$eValue)
+    },
+    numeric(1)
+  )
+
+  crossed <- e_path >= threshold
+
+  c(
+    reject = as.integer(any(crossed)),
+    n = min(c(looks[crossed], n_per_group))
+  )
+}
+
+n_sim <- 500L
+
+null_out <- t(replicate(
+  n_sim,
+  run_trial(0)
+))
+
+alt_out <- t(replicate(
+  n_sim,
+  run_trial(delta_min_t)
+))
+
+type1_hat <- mean(null_out[, "reject"])
+power_hat <- mean(alt_out[, "reject"])
+en_alt <- mean(alt_out[, "n"])
+
+se_type1 <- sqrt(
+  type1_hat * (1 - type1_hat) / n_sim
+)
+
+se_power <- sqrt(
+  power_hat * (1 - power_hat) / n_sim
+)
+
+alt_stop <- alt_out[, "n"]
+look_step <- min(diff(looks))
+```
+
+Across `r format(n_sim, big.mark = ",")` simulations under the null, the estimated type-I error is `r fmt_number(type1_hat)` with Monte Carlo standard error `r fmt_number(se_type1)`. Under the alternative, the estimated power is `r fmt_number(power_hat)` with standard error `r fmt_number(se_power)`, and the mean stopping sample size is `r fmt_number(en_alt)` observations per group. The type-I error estimate is a finite Monte Carlo check. The anytime-valid guarantee itself follows from the e-process property and Ville's inequality.
+
+@tbl-oc summarises the operating-characteristic estimates, and @fig-oc shows the stopping-sample-size distribution under the design alternative.
+
+```{r}
+#| label: tbl-oc
+#| echo: false
+#| tbl-cap: "Safe sequential and fixed-sample t-test characteristics at the same effect size, significance level, and target power. Safe-test error and power values are Monte Carlo estimates; fixed-sample values are design targets."
+
+oc_tab <- data.frame(
+  Procedure = c(
+    "Safe t-test",
+    "Fixed-sample t-test"
+  ),
+  `Type-I error` = c(
+    fmt_number(type1_hat),
+    fmt_number(alpha_single)
+  ),
+  Power = c(
+    fmt_number(power_hat),
+    fmt_number(1 - beta_design)
+  ),
+  `Planned n / group` = c(
+    n_per_group,
+    n_fixed_per_group
+  ),
+  `Mean n / group under alternative` = c(
+    fmt_number(en_alt),
+    as.character(n_fixed_per_group)
+  ),
+  check.names = FALSE
+)
+
+kableExtra::kbl(
+  oc_tab,
+  booktabs = TRUE,
+  align = "lrrrr"
+) |>
+  kableExtra::kable_styling(
+    latex_options = c("HOLD_position", "scale_down")
+  )
+```
+
+```{r}
+#| label: fig-oc
+#| echo: false
+#| fig-pos: "H"
+#| fig-cap: "Stopping sample size per group for the safe t-test under the design alternative. The dashed line marks its planned sample size and the dotted line the fixed-sample requirement."
+
+ggplot2::ggplot(
+  data.frame(n = alt_stop),
+  ggplot2::aes(x = n)
+) +
+  ggplot2::geom_histogram(
+    binwidth = look_step,
+    fill = "steelblue",
+    colour = "white"
+  ) +
+  ggplot2::geom_vline(
+    xintercept = n_per_group,
+    linetype = "dashed",
+    colour = "grey30"
+  ) +
+  ggplot2::geom_vline(
+    xintercept = n_fixed_per_group,
+    linetype = "dotted",
+    colour = "grey30"
+  ) +
+  ggplot2::labs(
+    x = "Stopping sample size per group",
+    y = "Number of simulations"
+  ) +
+  ggplot2::theme_minimal()
+```
+
+Under the design alternative, early threshold crossings reduce the mean sample size, while simulations without a crossing use the full planned sample. These results apply to the Gaussian model, effect size, and monitoring schedule specified above. They do not imply that the safe test is uniformly more powerful or more efficient than a fixed-sample test.

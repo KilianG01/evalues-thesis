@@ -1,0 +1,1377 @@
+# Safe Tests for Classical Problems {#sec-safe-tests}
+
+```{r}
+#| label: setup-ch3
+#| include: false
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+set.seed(2026)
+library(ggplot2)
+library(safestats)
+theme_set(theme_minimal(base_size = 12))
+```
+
+The foundations of @sec-foundations showed that e-values provide a valid and flexible framework for hypothesis testing. In this chapter, we show that several standard tests a statistics student encounters, including the z-test, t-test, tests for contingency tables, and the logrank test, admit principled e-value versions that remain valid under optional stopping and optional continuation while still accumulating evidence efficiently. Following @grunwald2024safe, we refer to these as **safe tests**.
+
+Most sections follow a common template. We present the theory and motivation behind the safe version of a classical test, implement it using the `safestats` R package [@turner2022safestats], compare its behaviour with the classical test on the same data, and demonstrate its validity under optional stopping. 
+
+
+## The safe testing framework {#sec-safe-framework}
+
+### From log-optimality to growth-rate optimality
+
+In @sec-epower we saw that, for simple-vs-simple testing, the log-optimal e-variable is the likelihood ratio, with e-power equal to the KL divergence. When the alternative is composite, as is typical in practical testing problems, the question becomes which e-variable to use.
+
+@grunwald2024safe propose a principled answer in the **growth-rate optimal (GRO)** e-variable. GRO is an analogue of power optimality for e-values, but in a different sense from the Neyman--Pearson framework. Whereas Neyman--Pearson theory maximises the probability of rejection at a fixed sample size, GRO maximises the expected rate of evidence accumulation. As discussed in @sec-epower, taking the expectation of the logarithm corresponds to maximising the long-run growth rate of a gambler's wealth, which motivates the term "growth-rate optimality."
+
+::: {#def-gro}
+## Growth-rate optimality (@grunwald2024safe, Section 2)
+Let $\mathcal{P}$ be the null hypothesis and let $Q$ be a simple alternative distribution. A **$Q$-GRO e-variable** is any maximiser, when it exists, of
+$$
+\mathbb{E}_Q[\log E]
+$$
+over all e-variables $E \in \mathcal{E}(\mathcal{P})$, where $\mathcal{E}(\mathcal{P})$ denotes the set of all e-variables for $\mathcal{P}$.
+:::
+
+By @thm-logoptimal (the log-optimality theorem from Chapter 2), when $\mathcal{P} = \{P\}$ is a simple null, the GRO e-variable is the likelihood ratio $dQ/dP$, and the corresponding optimal growth rate is the KL divergence $\mathrm{KL}(Q \| P)$. The main contribution of @grunwald2024safe is to extend this idea to **composite nulls**, the setting of most practical tests. For instance, a t-test has a composite null because the variance $\sigma^2$ is unknown, so $H_0$ specifies a whole family of distributions rather than a single one.
+
+### The GROW criterion for composite hypotheses
+
+When both the null and the alternative are composite, for example testing a range $\Theta_0 = \{\theta : \theta \leq \delta^-\}$ against a range $\Theta_1 = \{\theta : \theta \geq \delta^+\}$, we face the problem that the best e-variable depends on the true $\theta$, which we do not know. The **GROW (growth-rate optimal in worst-case)** criterion resolves this by seeking an e-variable that maximises the *worst-case* growth rate over the alternative [@grunwald2024safe, Section 3]. More precisely, a GROW e-variable is any maximiser, when it exists, of
+$$
+\inf_{\theta \in \Theta_1} \mathbb{E}_{P_\theta}[\log E]
+$$
+over all e-variables $E \in \mathcal{E}(\mathcal{P})$.
+
+Specifying a minimum relevant effect size $\delta^+$ that separates $\Theta_0$ from $\Theta_1$ is essential here. If we defined the alternative as $\theta > 0$ without any gap, the infimum would be driven by parameters arbitrarily close to the null boundary, and the worst-case growth rate would collapse to zero. In that case, the criterion no longer distinguishes practically useful e-variables. This is one reason why safe testing asks the researcher to state which effect sizes are scientifically relevant. By contrast, @grunwald2024safe (Example 3) show that a standard Bayes-factor construction based on a diffuse Gaussian prior over the whole alternative can become overly conservative in this setting, requiring signals of order $\sqrt{(\log n)/n}$ for rejection rather than the classical $1/\sqrt{n}$. Classical p-value tests, by contrast, do not require a minimum relevant effect size for validity, even though such an effect size may still be needed for design or power calculations. GROW therefore forces the researcher to state explicitly which effects are worth detecting, a requirement that may feel unfamiliar at first, but can also lead to more scientifically meaningful tests.
+
+To analyse this criterion, it is helpful to first fix the alternative. Theorem 1 of @grunwald2024safe requires full support for $Q$ and a finite infimum of $D(Q \| P_{W_0})$ over the null-model Bayes marginals. Under those conditions, once the alternative has been fixed, either as a single distribution $Q$ or as a chosen mixture $Q$ over the alternative parameter, the corresponding optimal e-variable has the likelihood-ratio form
+$$
+E^* = \frac{q(Y)}{p_0^*(Y)}.
+$$
+Here $P_0^*$ is the **Reverse Information Projection (RIPr)** of $Q$ onto the null-model Bayes marginals. In the examples used in this chapter, this projection is attained by an ordinary probability distribution. In general, Theorem 1 allows $P_0^*$ to be a sub-probability. For composite alternatives, the choice of mixture is itself part of the design, and GROW corresponds to choosing this mixture so as to maximise the worst-case growth rate over the alternative. For a simple null $\mathcal{P} = \{P\}$, this RIPr is just $P$ itself, so we recover the ordinary likelihood ratio. For the composite-null examples below, the RIPr identifies the null distribution that is hardest to distinguish from the chosen alternative, and betting against this least favourable null yields an e-variable that remains valid uniformly over the whole null. @fig-joint-projection illustrates the corresponding geometric picture.
+
+![Joint information projection (adapted from Figure 1 of @grunwald2024safe). The figure shows the two distributions $P_{W_1^*}$ and $P_{W_0^*}$ forming the least-favourable pair, that is, the pair that minimises the KL divergence between the alternative and null sets. In the resulting least-favourable pair, the GROW e-variable is the likelihood ratio between these two distributions.](fig-joint-projection.pdf){#fig-joint-projection fig-align="center" width="85%" fig-pos="H"} 
+
+For one-dimensional models with separated null and alternative hypotheses and a monotone likelihood ratio in a statistic, @grunwald2024safe obtain a particularly clean boundary-point result in Proposition 3. One-parameter exponential families are an important special case, treated in their Example 4 in the mean-value parameterisation.
+
+::: {#prp-grow-expfam}
+## GROW under a monotone likelihood ratio
+Following Proposition 3 of @grunwald2024safe, suppose $\{P_\theta : \theta \in \Theta\}$ is a one-parameter model on a connected ordered parameter space and there exists a one-dimensional statistic $T=t(Y)$ such that the family has a monotone likelihood ratio in $T$. Fix separation points $\delta^- < \delta^+$ in $\Theta$. For testing $\Theta_0 = \{\theta : \theta \leq \delta^-\}$ against $\Theta_1 = \{\theta : \theta \geq \delta^+\}$, the GROW e-variable is
+$$
+E^* = \frac{p_{\delta^+}(Y)}{p_{\delta^-}(Y)},
+$$
+the likelihood ratio between the two boundary points. For an iid one-parameter exponential family in the mean-value parameterisation, Example 4 verifies this condition for the joint sample $Y^n=(Y_1,\ldots,Y_n)$, with $p_\theta(Y^n)=\prod_{i=1}^n p_\theta(Y_i)$.
+:::
+
+This result is striking, because even though both hypotheses are composite, the optimal e-variable reduces to a simple likelihood ratio. In the Gaussian location family with known variance (the setting of the safe z-test), this corresponds to testing $H_0: \mu \leq 0$ against $H_1: \mu \geq \delta^+$ with $\delta^- = 0$, which yields the GROW e-variable
+$$
+E^* = \frac{p_{\delta^+}(Y^n)}{p_0(Y^n)}.
+$$
+
+### Nuisance parameters and the safe t-test
+
+The GROW result above assumes that the only unknown quantity is the parameter of interest. In a z-test, the variance is known, so this works cleanly. In a t-test, however, the variance $\sigma^2$ is also unknown. This introduces a nuisance parameter, which is not itself the object of inference but still affects the distribution of the data and therefore the validity of the e-variable.
+
+To see the difficulty, suppose we tried to apply GROW directly by constructing a likelihood-ratio e-variable as if $\sigma^2 = 1$ were known. An e-variable must satisfy $\mathbb{E}_P[E] \leq 1$ for every distribution in the null model, including every admissible value of $\sigma$. If the true variance were different, say $\sigma^2 = 100$, then the resulting statistic would generally no longer be calibrated against the whole null and might fail to be a valid e-variable. In the language of @sec-betting, the bet would be calibrated to the wrong game.
+
+The solution developed in @grunwald2024safe (Section 4.3) is to restrict attention to e-variables that are **invariant under rescaling of the data**. An invariant e-variable depends on the data only through scale-free statistics, whose distribution does not depend on $\sigma$, so the nuisance parameter effectively drops out and the GROW criterion can be applied within this restricted class. The **REGROW** (relative growth-rate optimal in worst-case) criterion plays a complementary role. It compares the growth rate of a candidate e-variable to the oracle GRO growth rate that would be available if $\sigma$ were known, and @grunwald2024safe use it to justify the invariance restriction, because the scale-invariant GROW e-variable is also worst-case optimal in the REGROW sense among all e-variables, not only the invariant ones [@grunwald2024safe; @perez2024estatistics].
+
+The key technical step is to reduce the data to a scale-free statistic whose distribution no longer depends on $\sigma$. In the t-test setting, this can be done by normalising the pooled data vector by a common scale factor, so that the nuisance parameter cancels out. As discussed in @grunwald2024safe (Section 4.3), this coarsening step is mathematically equivalent to using the scale-invariant right-Haar prior $\pi(\sigma) \propto 1/\sigma$ on the scale parameter. The resulting e-variable therefore has a simple closed-form representation as a Bayes factor with right-Haar prior [@grunwald2024safe, Section 4.3; @berger1998bayes]. Thus, a construction familiar from objective Bayesian analyses of the t-test also receives a frequentist optimality justification in the safe-testing framework. For the applied researcher, the practical point is that `safestats` implements this construction internally, so the resulting e-value can be used just like the other safe-test e-values and retains the same validity under optional stopping.
+
+
+### Optional stopping and optional continuation
+
+The key practical consequence of using e-values for testing is **safety under optional stopping and optional continuation**. If $E^{(1)}, E^{(2)}, \ldots$ are conditional e-variables from successive studies (formally defined in @sec-conditional-evalues), meaning that each $E^{(j)}$ remains an e-variable conditional on the information available before study $j$, then their running product
+$$
+\mathcal{E}^{(m)} = \prod_{j=1}^m E^{(j)}
+$$
+forms a test supermartingale (@def-test-supermartingale) under the null, that is, a nonnegative process whose conditional expectation cannot increase under the null. Consequently, Ville's inequality (formalised as @thm-ville in the next chapter) implies [@grunwald2024safe]
+$$
+P\!\left(\exists\, m : \mathcal{E}^{(m)} \geq 1/\alpha\right) \leq \alpha
+$$
+for all $P \in \mathcal{P}$. This guarantee holds regardless of the rule used to decide whether to continue collecting data, whether to start a new study, or when to stop. As @ly2025savi emphasise, this means that the evidence threshold $1/\alpha$ can be monitored continuously during data collection, and crossing it at any time constitutes a valid rejection at level $\alpha$.
+
+
+## Safe z-test {#sec-safe-z}
+
+We begin with the simplest case, testing a normal mean with known variance. This is the safe analogue of the classical one-sided z-test. Although the assumption of known variance is rarely realistic, the safe z-test illustrates the main ideas in their simplest form before we move to the more practical t-test.
+
+### Setup and the GROW e-variable
+
+Consider $X_1, \ldots, X_n \overset{\text{iid}}{\sim} \mathrm{N}(\theta, 1)$. We test
+$$
+H_0 : \theta \leq 0
+\qquad \text{against} \qquad
+H_1 : \theta \geq \delta_{\min},
+$$
+for a pre-specified minimum relevant effect size $\delta_{\min} > 0$. In the notation of @prp-grow-expfam, we set $\delta^+ = \delta_{\min}$ and $\delta^- = 0$. The resulting GROW e-variable is the likelihood ratio
+$$
+E_n = \frac{p_{\delta_{\min}}(X^n)}{p_0(X^n)}
+= \exp\!\left(\delta_{\min} S_n - \frac{n \delta_{\min}^2}{2}\right),
+$$
+where $S_n = \sum_{i=1}^n X_i$. This is exactly the Gaussian likelihood ratio from @sec-lr-gaussian, evaluated at $\mu = \delta_{\min}$.
+
+Because the Gaussian likelihood factorises over observations, the process $(E_n)_{n \geq 1}$ can be written as a running product of one-step likelihood ratios,
+$$
+E_n = \prod_{i=1}^n \exp\!\left(\delta_{\min} X_i - \frac{\delta_{\min}^2}{2}\right).
+$$
+Under the boundary null $\theta = 0$, this process is a nonnegative martingale, and under the composite null $H_0: \theta \leq 0$ it is a nonnegative supermartingale. Ville's inequality, formalised as @thm-ville in the next chapter, therefore guarantees type-I error control under arbitrary stopping.
+
+### Implementation with `safestats`
+
+The `safestats` package provides functions for designing and executing safe z-tests. The workflow consists of two steps. First, create a design object that specifies the test parameters. Second, apply the test to data.
+
+```{r}
+#| label: safe-z-design
+# Design a safe z-test: meanDiffMin = 0.3, alpha = 0.05, power = 0.8
+# Note: designSafeZ uses 'meanDiffMin' (not deltaMin), since sigma is known
+# capture.output suppresses the txtProgressBar output from the simulations
+set.seed(2026)
+invisible(capture.output(
+  design_z <- designSafeZ(meanDiffMin = 0.3, alpha = 0.05, beta = 0.2,
+                          alternative = "greater")
+))
+print(design_z)
+```
+
+```{r}
+#| label: safe-z-design-helpers
+#| include: false
+# Extract design quantities for inline referencing
+z_nplan <- round(design_z$nPlan)
+z_nmean <- round(design_z$nMean)
+z_phis  <- design_z$parameter
+
+# Batch (single-look) sample size: the print method computes this internally
+# and displays it as "Note: If it is only possible to look at the data once,
+# then nPlan = X." We extract it by capturing the print output.
+z_print_output <- capture.output(print(design_z))
+z_batch_line <- grep("nPlan\\s*=\\s*\\d+", z_print_output, value = TRUE)
+z_batch_line <- z_batch_line[length(z_batch_line)]
+z_batch <- as.integer(sub(".*nPlan\\s*=\\s*(\\d+).*", "\\1", z_batch_line))
+
+# Classical z-test sample size for comparison
+z_n_classical <- ceiling(((qnorm(1 - 0.05) + qnorm(0.8)) / 0.3)^2)
+```
+
+The design object provides several useful planning quantities. Using internal simulation under the design assumptions ($\alpha = 0.05$, power $= 0.8$, $\delta_{\min} = 0.3$), `safestats` reports the sequential planning horizon, the expected realised sample size, and the test-defining parameter. Let $E_n$ denote the running e-value and define
+$$
+\tau_\alpha = \inf\{n \geq 1 : E_n \geq 1/\alpha\}.
+$$
+We briefly interpret the main components.
+
+**`parameter: phiS` = `r z_phis`.**  
+This is the safe test defining parameter $\phi_S$. In the present z-test setting, it corresponds to the alternative value used in the likelihood ratio, so the package output is consistent with the GROW construction from @sec-safe-framework.
+
+**`decision rule: e-value > 1/alpha` = `r 1/0.05`.**  
+This confirms that the rejection threshold is $1/\alpha = 20$, the standard Markov threshold from @prp-markov.
+
+**`nPlan` = `r z_nplan`.**  
+If we monitor the data sequentially, this is the planned monitoring horizon calibrated so that, under the design alternative,
+$$
+P_{\theta=\delta_{\min}}(\tau_\alpha \leq n_{\mathrm{Plan}})
+=
+P_{\theta=\delta_{\min}}\!\left(\exists n \leq n_{\mathrm{Plan}} : E_n \geq 1/\alpha\right)
+\approx 0.8.
+$$
+Thus, for the present design, `nPlan` means that the safe z-test crosses the threshold $20$ by this sample size with probability approximately $0.8$ when $\theta = \delta_{\min} = 0.3$.
+
+**`nMean` = `r z_nmean`.**  
+This is the expected realised sample size under the same design alternative and monitoring rule, approximately
+$$
+\mathbb{E}_{\theta=\delta_{\min}}\!\left[\min(\tau_\alpha, n_{\mathrm{Plan}})\right].
+$$
+Because the test may stop as soon as the e-value crosses $20$, the expected realised sample size is typically smaller than the planned monitoring horizon.
+
+**Batch note: `nPlan` = `r z_batch` (single look).**  
+If we commit to a fixed design and analyse the data only once at the end, the relevant power statement is no longer a first-crossing probability. Instead, the single-look sample size is calibrated so that
+$$
+P_{\theta=\delta_{\min}}\!\left(E_{n_{\mathrm{batch}}} \geq 1/\alpha\right)
+\approx 0.8.
+$$
+For the present design, this gives `r z_batch` observations. For comparison, the classical one-sided z-test with known variance requires a sample size of
+$$
+n = \left\lceil \frac{(z_\alpha + z_\beta)^2}{\delta_{\min}^2} \right\rceil,
+$$
+where $z_\alpha = \Phi^{-1}(1-\alpha)$ and $z_\beta = \Phi^{-1}(1-\beta)$ are the standard normal quantiles entering the usual fixed-horizon power calculation. With $\alpha = 0.05$, $\beta = 0.2$, and $\delta_{\min} = 0.3$, this evaluates to `r z_n_classical` observations. In this batch-style comparison, the safe test therefore requires roughly `r round(z_batch / z_n_classical, 1)`$\times$ more data, reflecting the cost of retaining anytime validity without actually using early stopping.
+
+Importantly, these design quantities are planning tools rather than binding requirements. Unlike classical fixed-horizon p-values, which lose their nominal error control under unplanned repeated looks, the safe z-test remains valid no matter when data collection stops.
+
+### Hand-coded vs `safestats` comparison
+
+We now verify that the `safestats` implementation agrees with the hand-coded safe z-test e-variable derived above. Concretely, this is the same Gaussian likelihood ratio as in @sec-lr-gaussian, specialised to the present GROW setup with $\delta_{\min} = 0.3$. We simulate data under the alternative $\theta^\dagger = 0.3$ and compute both versions.
+```{r}
+#| label: safe-z-comparison
+#| message: false
+#| warning: false
+theta_true <- 0.3
+delta_min <- 0.3
+n <- 150
+set.seed(42)
+x <- rnorm(n, mean = theta_true, sd = 1)
+
+# Hand-coded GROW e-variable (running product of per-observation LRs)
+log_e_hand <- cumsum(delta_min * x - delta_min^2 / 2)
+
+# safestats sequential computation for verification
+# safestats requires at least 2 observations; we start at 3 to avoid
+# edge-case warnings with very small samples
+e_safestats <- numeric(n)
+for (i in 3:n) {
+  result_i <- safeZTest(x[1:i], designObj = design_z, alternative = "greater")
+  e_safestats[i] <- result_i$eValue
+}
+
+# Verify agreement (compare on log scale, skip first 2 where safestats = 0)
+log_e_safestats <- log(e_safestats)
+max_diff <- max(abs(log_e_hand[3:n] - log_e_safestats[3:n]), na.rm = TRUE)
+cat("Max |log(E_hand) - log(E_safestats)| for n = 3,...,150:",
+    formatC(max_diff, digits = 2, format = "e"), "\n")
+```
+
+```{r}
+#| label: fig-safe-z-comparison
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "Sequential log e-value path for the safe z-test under the alternative $\\theta^\\dagger = 0.3$. The evidence crosses the rejection threshold $\\log(1/\\alpha) \\approx 3$ well before $n = 100$. The hand-coded GROW formula and the `safestats` implementation agree to within numerical tolerance, with the maximum absolute difference printed above the figure."
+#| fig-width: 7
+#| fig-height: 4
+
+df_z <- data.frame(t = 1:n, log_e = log_e_hand)
+
+ggplot(df_z, aes(x = t, y = log_e)) +
+  geom_line(color = "steelblue", linewidth = 0.7) +
+  geom_hline(yintercept = log(20), linetype = "dashed", color = "grey40") +
+  annotate("text", x = 140, y = log(20) + 0.5,
+           label = "log(1/alpha) at alpha = 0.05",
+           hjust = 1, size = 3, color = "grey40") +
+  labs(x = "Sample size", y = "log(e-value)") +
+  theme(legend.position = "bottom")
+```
+
+@fig-safe-z-comparison shows the sequential path. For this simulated dataset, the maximum discrepancy between the hand-coded formula and `safestats` is `r formatC(max_diff, digits = 2, format = "e")`, that is, within numerical tolerance. This shows that the package implementation matches the hand-coded likelihood-ratio e-variable up to numerical error. Both curves would therefore overlap visually, so we plot only the hand-coded path. Since the true effect equals the design alternative ($\theta^\dagger = \delta_{\min} = 0.3$), the expected log e-value increases by $\delta_{\min}^2 / 2 = 0.045$ per observation, giving the path a positive average drift under the alternative.
+
+### Comparison with the classical z-test
+
+The key difference between the safe z-test and the classical z-test is their behaviour under repeated testing. We illustrate this with a simulation under the null.
+```{r}
+#| label: safe-z-fpr-data
+#| message: false
+#| warning: false
+n_max <- 200
+n_sim <- 5000
+delta_min <- 0.3
+
+# Track cumulative false positive rates under continuous monitoring
+fp_classical <- numeric(n_max)
+fp_safe <- numeric(n_max)
+
+set.seed(123)
+for (sim in 1:n_sim) {
+  x <- rnorm(n_max, mean = 0, sd = 1)
+  s_cumsum <- cumsum(x)
+
+  ever_rejected_classical <- FALSE
+  ever_rejected_safe <- FALSE
+
+  for (nn in 2:n_max) {
+    # Classical z-test p-value (one-sided)
+    z_stat <- s_cumsum[nn] / sqrt(nn)
+    p_val <- 1 - pnorm(z_stat)
+    if (p_val < 0.05 && !ever_rejected_classical) {
+      ever_rejected_classical <- TRUE
+    }
+    if (ever_rejected_classical) fp_classical[nn] <- fp_classical[nn] + 1
+
+    # Safe z-test e-value
+    log_e <- delta_min * s_cumsum[nn] - nn * delta_min^2 / 2
+    if (log_e >= log(20) && !ever_rejected_safe) {
+      ever_rejected_safe <- TRUE
+    }
+    if (ever_rejected_safe) fp_safe[nn] <- fp_safe[nn] + 1
+  }
+}
+
+fp_classical <- fp_classical / n_sim * 100
+fp_safe <- fp_safe / n_sim * 100
+
+df_fpr <- data.frame(
+  n = rep(2:n_max, 2),
+  fpr = c(fp_classical[2:n_max], fp_safe[2:n_max]),
+  method = rep(c("Classical z-test (monitor p < 0.05)",
+                 "Safe z-test (monitor E >= 20)"), each = n_max - 1)
+)
+```
+
+```{r}
+#| label: fig-safe-z-fpr
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "False positive rates under continuous monitoring. The classical z-test (monitoring $p < 0.05$) rapidly inflates beyond the nominal 5\\%. The safe z-test (monitoring $E \\geq 20$) stays close to the nominal 5\\% level in this simulation."
+#| fig-width: 7
+#| fig-height: 4.5
+ggplot(df_fpr, aes(x = n, y = fpr, color = method)) +
+  geom_line(linewidth = 0.7) +
+  geom_hline(yintercept = 5, linetype = "dashed", color = "grey40") +
+  annotate("text", x = 170, y = 7, label = "alpha = 5%", size = 3,
+           color = "grey40") +
+  labs(x = "Number of looks / sample size", y = "False positive rate (%)",
+       color = NULL) +
+  coord_cartesian(ylim = c(0, 50)) +
+  theme(legend.position = "bottom")
+```
+
+This simulation illustrates what Ville's inequality guarantees theoretically. The safe z-test remains controlled at the nominal 5% level under continuous monitoring, whereas the classical z-test does not. In this simulation, the estimated false positive rate of the safe test stays close to and below the 5% boundary, while the classical z-test reaches `r round(fp_classical[n_max], 1)`% by $n = `r n_max`$. If monitoring were continued indefinitely, the classical rejection probability would converge to 1. Indeed, under the null, the partial sums satisfy the law of the iterated logarithm,
+$$
+\limsup_{n \to \infty}
+\frac{S_n}{\sqrt{2n \log(\log n)}} = 1
+\qquad \text{almost surely},
+$$
+where $\log(\log n)$ denotes the logarithm applied twice. Hence the repeatedly monitored z-statistic $S_n/\sqrt{n}$ exceeds any fixed critical value at some time, indeed infinitely often, almost surely.
+
+This difference arises because a classical p-value test is valid only when conducted once at a pre-specified sample size. If we repeatedly check whether $p < 0.05$ during data collection, the probability of eventually crossing that threshold becomes much larger than $\alpha$. As @ly2025savi emphasise (their Figure 2), this inflation is caused by repeated monitoring, not by any defect of the fixed-horizon z-test itself. At any fixed $n$, the classical test controls type-I error, but the probability of ever rejecting under continuous monitoring can become arbitrarily close to 1.
+
+## Safe t-test {#sec-safe-t}
+
+The t-test is arguably the most widely used statistical test. Its safe analogue is therefore one of the most important examples in this chapter. The main challenge is the unknown variance $\sigma^2$, which acts as a nuisance parameter.
+
+### One-sample derivation and two-sample implementation
+
+The invariant derivation in @grunwald2024safe is most transparent for the one-sample model
+$$
+Y_1,\ldots,Y_n
+\overset{\text{iid}}{\sim}
+\mathrm{N}(\delta\sigma,\sigma^2),
+$$
+where $\delta$ is the standardised mean and the unknown scale $\sigma$ is a nuisance parameter. The null is $\delta=0$, while the alternative is specified through a prior or a minimum relevant effect size.
+
+The key insight of @grunwald2024safe (Section 4.3, building on @berger1998bayes and @lai1976confidence) is that the scale parameter can be removed by a **coarsening** of the data. Let $Y=(Y_1,\ldots,Y_n)$ and define $V=Y/|Y_1|$. Because every coordinate is multiplied by the same $\sigma$, the distribution of $V$ depends on $\delta$ but not on $\sigma$. The resulting e-variable can be written as a likelihood ratio on the coarsened data,
+$$
+E^* = \frac{p'_{W[\delta]}(V)}{p'_0(V)},
+$$
+where $p'_0$ is the density of $V$ under the null and $p'_{W[\delta]}$ is its density under a prior $W[\delta]$ on the effect size. As shown in @grunwald2024safe (Equation 29), this coincides with the Bayes factor obtained by using the right-Haar prior $\pi(\sigma)\propto 1/\sigma$ on the scale parameter in both models.
+
+Combining Theorems 1 and 2 of @grunwald2024safe yields the optimality result. Theorem 2 is a special case of the group-invariance results of @perez2024estatistics. For a fixed effect-size distribution $W[\delta]$ satisfying the finite-$(2+\epsilon)$-moment condition in Theorem 2, a condition satisfied by the finite-support GROW tuning distribution used below, the resulting e-variable is GROW relative to the class of proper product priors on $(\delta,\sigma)$ under which $\delta$ and $\sigma$ are independent and the marginal on $\delta$ equals $W[\delta]$. This gives a frequentist optimality justification for a construction that also appears in objective Bayesian analyses of the t-test.
+
+The applied example below uses an independent two-sample problem with a common unknown variance. Its equal-variance t-statistic is
+$$
+T
+=
+\frac{\bar X_1-\bar X_2}
+{S_p\sqrt{1/n_1+1/n_2}},
+$$
+where $S_p$ is the pooled standard deviation. Under the standardised effect $\delta=(\mu_1-\mu_2)/\sigma$, this statistic has a noncentral t-distribution with $n_1+n_2-2$ degrees of freedom and noncentrality parameter $\sqrt{n_{\mathrm{eff}}}\,\delta$, where
+$$
+n_{\mathrm{eff}}
+=
+\left(\frac{1}{n_1}+\frac{1}{n_2}\right)^{-1}.
+$$
+The `safestats` implementation evaluates the corresponding e-value through the central and noncentral t densities [@turner2022safestats]. The one-sample coarsening therefore provides the theoretical motivation for handling the unknown scale, while `designSafeT()` and `safeTTest()` provide the two-sample implementation used below.
+
+### E-process types for the safe t-test
+
+@ly2025savi (Section 1.2.5) discuss four types of e-processes for the safe t-test, each based on a different tuning distribution over the effect-size parameter. These distributions are selected and optimised as design choices rather than interpreted as Bayesian prior beliefs:
+
+1. **`grow`**: a two-point tuning distribution at $\pm \delta_{\min}$. This is the GROW-optimal choice in the worst-case sense, so it is tuned to accumulate evidence as fast as possible at the boundary $|\delta| = \delta_{\min}$.
+
+2. **`mom`**: a non-local moment tuning distribution with two modes near $\pm \delta_{\min}$. @ly2025savi recommend this as a good compromise between efficiency and robustness to misspecification of $\delta_{\min}$.
+
+3. **`eGauss`**: a Gaussian tuning distribution on the effect size, with scale chosen as a function of $\delta_{\min}$.
+
+4. **`eCauchy`**: a Cauchy tuning distribution on the effect size. This is the heaviest-tailed option and the most robust to misspecification among the four types.
+
+All four define valid e-processes under optional stopping, but they differ in how aggressively they accumulate evidence and how sensitive they are to the choice of $\delta_{\min}$. @ly2025savi (Table 1) compare their resulting planned sample sizes. The `safestats` package implements the safe t-test through `designSafeT()`, which reports the test-defining parameter `deltaS`. For a two-sided test, `deltaS` determines the equal-weight numerator mixture of noncentral t densities with noncentrality parameters $+\sqrt{n_{\mathrm{eff}}}\,\delta_S$ and $-\sqrt{n_{\mathrm{eff}}}\,\delta_S$, while the denominator is the central t density. It therefore plays a role analogous to $\phi_S$ in the safe z-test. In the GROW design below, `deltaS` equals the stated `deltaMin`.
+
+### Applied example: safe t-test on simulated data {#sec-safe-t-example}
+
+We simulate a two-sample experiment to illustrate the safe t-test workflow, designing the test, monitoring the evidence sequentially, and comparing the e-value path with the classical p-value path.
+
+**Design.** We design a two-sample safe t-test with a minimum relevant standardised effect size of $\delta_{\min} = 0.5$, conventionally described as a medium effect under Cohen's benchmarks [@cohen1992power], at level $\alpha = 0.05$ and target power $0.8$.
+```{r}
+#| label: safe-t-design-run
+#| include: false
+invisible(capture.output(
+  design_t <- designSafeT(deltaMin = 0.5, alpha = 0.05, beta = 0.2,
+                          testType = "twoSample", seed = 42)
+))
+```
+```{r}
+#| label: safe-t-design
+#| eval: false
+design_t <- designSafeT(deltaMin = 0.5, alpha = 0.05, beta = 0.2,
+                        testType = "twoSample", seed = 42)
+```
+```{r}
+#| label: safe-t-design-print
+#| echo: false
+cat(strwrap(capture.output(print(design_t)), width = 72), sep = "\n")
+```
+```{r}
+#| label: safe-t-design-helpers
+#| include: false
+t_delta_min    <- unname(design_t$esMin[1])
+t_alpha        <- unname(design_t$alpha)
+t_power_target <- 1 - unname(design_t$beta)
+t_nplan  <- round(unname(design_t$nPlan[1]))
+t_nmean  <- round(unname(design_t$nMean[1]))
+t_nbatch <- round(unname(design_t$nPlanBatch[1]))
+t_nclassical <- ceiling(
+  stats::power.t.test(
+    delta       = t_delta_min,
+    sd          = 1,
+    sig.level   = t_alpha,
+    power       = t_power_target,
+    type        = "two.sample",
+    alternative = "two.sided"
+  )$n
+)
+```
+
+The design object reports a sequential planning horizon of `r t_nplan` observations per group and an expected realised sample size of approximately `r t_nmean` under the design alternative. If the safe test is evaluated only once, the corresponding requirement is `r t_nbatch` observations per group, whereas the classical two-sided equal-variance t-test requires `r t_nclassical` observations per group. The safe design therefore trades a larger monitoring horizon and single-look requirement for the possibility of earlier stopping when evidence accumulates quickly. This is a design-specific comparison rather than a general claim that the safe test is more sample-efficient, and @sec-safe-t-power compares fixed-sample power systematically. As with the safe z-test, these design quantities are planning tools rather than binding requirements. Optional stopping does not invalidate the test, but the design still determines the intended power properties.
+
+**Data generating process.** We simulate $n = 120$ independent observations per group from Gaussian distributions with a common standard deviation $\sigma = 2$:
+$$X_{1,i} \overset{\text{iid}}{\sim} \mathrm{N}(4.5,\; 4), \qquad X_{2,i} \overset{\text{iid}}{\sim} \mathrm{N}(3.5,\; 4), \qquad i = 1, \ldots, 120.$$
+The true standardised effect size is $\delta = (\mu_1 - \mu_2)/\sigma = (4.5 - 3.5)/2 = 0.5$, so the simulation is calibrated to the design value $\delta_{\min} = 0.5$.
+```{r}
+#| label: safe-t-example-setup
+set.seed(123)
+n_per_group <- 120
+sigma <- 2
+mu1 <- 4.5
+mu2 <- 3.5
+
+x_group1 <- rnorm(n_per_group, mean = mu1, sd = sigma)
+x_group2 <- rnorm(n_per_group, mean = mu2, sd = sigma)
+n_start <- 10
+```
+```{r}
+#| label: safe-t-example-loop
+#| include: false
+# Compute e-value and p-value at each sample size
+e_vals <- numeric(n_per_group)
+p_vals <- numeric(n_per_group)
+
+for (i in n_start:n_per_group) {
+  safe_res <- safeTTest(x_group1[1:i], x_group2[1:i],
+                        designObj = design_t, pilot = FALSE)
+  e_vals[i] <- safe_res$eValue
+
+  p_vals[i] <- t.test(x_group1[1:i], x_group2[1:i],
+                      var.equal = TRUE)$p.value  # descriptive comparison
+}
+
+first_crossing <- which(e_vals >= 20 & seq_along(e_vals) >= n_start)[1]
+if (is.na(first_crossing)) {
+  crossing_msg <- "the e-value did not cross the threshold within 120 observations"
+} else {
+  crossing_msg <- paste0("the e-value first crossed the threshold of 20 at $n = ",
+                         first_crossing, "$ per group")
+}
+```
+```{r}
+#| label: fig-safe-t-example
+#| echo: false
+#| fig-cap: "Safe t-test applied to a single simulated realisation with $\\delta = 0.5$, equal to the design value $\\delta_{\\min}$. Left: sequential e-value path with rejection threshold $1/\\alpha = 20$. Right: classical equal-variance t-test p-value recomputed at each sample size, shown for descriptive comparison only."
+#| fig-width: 9
+#| fig-height: 4
+
+df_e <- data.frame(
+  n = n_start:n_per_group,
+  e_val = e_vals[n_start:n_per_group]
+)
+
+p1 <- ggplot(df_e, aes(x = n, y = e_val)) +
+  geom_line(color = "steelblue", linewidth = 0.7) +
+  geom_hline(yintercept = 20, linetype = "dashed", color = "grey40") +
+  scale_y_log10() +
+  annotate("text", x = 100, y = 30, label = "1/alpha = 20", size = 3,
+           color = "grey40") +
+  labs(x = "Sample size per group", y = "e-value (log scale)",
+       title = "Safe t-test (valid under optional stopping)")
+
+df_p <- data.frame(
+  n = n_start:n_per_group,
+  p_val = p_vals[n_start:n_per_group]
+)
+
+p2 <- ggplot(df_p, aes(x = n, y = p_val)) +
+  geom_line(color = "firebrick", linewidth = 0.7) +
+  geom_hline(yintercept = 0.05, linetype = "dashed", color = "grey40") +
+  scale_y_log10() +
+  annotate("text", x = 100, y = 0.08, label = "alpha = 0.05", size = 3,
+           color = "grey40") +
+  labs(x = "Sample size per group", y = "p-value (log scale)",
+       title = "Classical equal-variance t-test (p-values)")
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+```
+
+In the realisation shown in @fig-safe-t-example, `r crossing_msg`, well below the planned maximum of `r t_nplan` per group. This illustrates the possibility of valid early stopping when evidence accumulates quickly, although it is only a single simulated path rather than a general guarantee.
+
+The right-hand panel shows the classical equal-variance p-value recomputed at each sample size for descriptive comparison. Repeated monitoring of classical p-values is not anytime-valid, so crossing $0.05$ at an interim look would not justify rejection, as we demonstrated empirically in @fig-safe-z-fpr.
+
+### Power comparison: safe t-test vs classical t-test {#sec-safe-t-power}
+
+The flexibility of the safe t-test comes at a cost in fixed-sample settings. To illustrate this trade-off, we run Monte Carlo simulations comparing the safe t-test (tuned to $\delta_{\min} = 0.5$) with the classical equal-variance two-sample t-test. For the power simulations in this subsection, we sweep directly over the standardised effect $\delta$ and generate data from $\mathrm{N}(\delta/2, 1)$ and $\mathrm{N}(-\delta/2, 1)$, so the common standard deviation is $1$ by construction and the mean difference is exactly $\delta$. This is a change of parameterisation relative to the illustrative example in @sec-safe-t-example, which used $\sigma = 2$ and expressed $\delta$ through the raw mean difference. Because both the classical t-test and the safe t-test are formulated in terms of the standardised effect size, the two setups are equivalent up to a common rescaling whenever $\delta$ is the same. Sweeping directly over $\delta$ is therefore the more convenient way to display power curves.
+
+#### Fixed-sample power
+
+We first compare rejection rates when both tests analyse the same data at a single, pre-determined sample size. There is no sequential monitoring and no early stopping, only the fixed-sample setting that favours the classical test most strongly.
+
+```{r}
+#| label: safe-t-power-fixed-sim
+#| cache: true
+set.seed(2026)
+n_sim_power <- 500
+delta_grid_power <- seq(0, 1.0, by = 0.1)
+n_grid_power <- c(30, 60, 120)
+alpha <- 0.05
+
+results_power <- expand.grid(
+  delta = delta_grid_power,
+  n_per_group = n_grid_power,
+  power_classical = NA_real_,
+  power_safe = NA_real_
+)
+
+for (r in seq_len(nrow(results_power))) {
+  d <- results_power$delta[r]
+  nn <- results_power$n_per_group[r]
+  rej_c <- 0L
+  rej_s <- 0L
+
+  for (sim in seq_len(n_sim_power)) {
+    x1 <- rnorm(nn, mean = d / 2, sd = 1)
+    x2 <- rnorm(nn, mean = -d / 2, sd = 1)
+
+    if (t.test(x1, x2, var.equal = TRUE)$p.value < alpha) {
+      rej_c <- rej_c + 1L
+    }
+
+    safe_res <- safeTTest(x1, x2, designObj = design_t, pilot = FALSE)
+    if (safe_res$eValue >= 1 / alpha) {
+      rej_s <- rej_s + 1L
+    }
+  }
+
+  results_power$power_classical[r] <- rej_c / n_sim_power
+  results_power$power_safe[r] <- rej_s / n_sim_power
+}
+```
+
+```{r}
+#| label: safe-t-power-fixed-helpers
+#| include: false
+df_power_mc <- rbind(
+  data.frame(
+    delta = results_power$delta,
+    n_per_group = results_power$n_per_group,
+    power = results_power$power_classical,
+    method = "Classical t-test"
+  ),
+  data.frame(
+    delta = results_power$delta,
+    n_per_group = results_power$n_per_group,
+    power = results_power$power_safe,
+    method = "Safe t-test"
+  )
+)
+
+df_power_mc$n_label <- factor(
+  paste0("n = ", df_power_mc$n_per_group, " per group"),
+  levels = paste0("n = ", n_grid_power, " per group")
+)
+
+cap_safe_t_power_fixed <- paste(
+  "Monte Carlo power curves for the classical equal-variance t-test and the",
+  "safe t-test (tuned to $\\\\delta_{\\\\min} = 0.5$) at three fixed sample",
+  "sizes. Each point is based on 500 simulated experiments. In this",
+  "simulation, the safe t-test is less powerful at every fixed $n$",
+  "considered, reflecting the cost of anytime validity."
+)
+```
+
+```{r}
+#| label: fig-safe-t-power-fixed
+#| echo: false
+#| fig-cap: !expr cap_safe_t_power_fixed
+#| fig-width: 8
+#| fig-height: 4
+#| fig-pos: "H"
+ggplot(df_power_mc, aes(x = delta, y = power, color = method)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.5) +
+  geom_hline(yintercept = alpha, linetype = "dotted", color = "grey60") +
+  facet_wrap(~n_label) +
+  scale_color_manual(values = c("Classical t-test" = "firebrick",
+                                "Safe t-test" = "steelblue")) +
+  labs(x = expression(delta ~ "(true standardised effect size)"),
+       y = "Power (rejection rate)",
+       color = NULL) +
+  theme(legend.position = "bottom")
+```
+
+As @fig-safe-t-power-fixed shows, at every fixed sample size considered in this simulation, the classical equal-variance t-test is more powerful than the safe t-test. For $n = 30$ per group, the gap is substantial, and even at $n = 120$ the safe test still has noticeably lower rejection probability at the same true effect size. This is the fixed-sample price of anytime validity. If the test is used only once at a predetermined sample size, the flexibility of optional stopping is not exploited, while the evidential threshold $1/\alpha$ remains in force. The qualitative pattern is the same as in the z-test setting, where @grunwald2024safe (Equation 32) derive a precise constant-factor result for the Gaussian location model. For the safe t-test with its more complex nuisance-parameter handling, the size of the gap depends on the chosen safe design, including the design value $\delta_{\min}$.
+
+#### Power under optional stopping
+
+The comparison becomes more nuanced once we allow sequential monitoring. In the present design, data are collected gradually and the safe t-test may reject as soon as the e-value exceeds $1/\alpha = 20$ at one of the periodic inspection times. We illustrate this by simulating up to $n_{\max} = 200$ observations per group and checking the e-value every 10 observations [@grunwald2024safe; @ly2025savi].
+
+```{r}
+#| label: safe-t-power-seq-sim
+#| cache: true
+#| include: false
+set.seed(2026)
+n_sim_seq <- 500
+delta_seq <- c(0.3, 0.5, 0.8)
+n_max_seq <- 200
+check_every <- 10
+
+seq_results <- list()
+
+for (d in delta_seq) {
+  stop_times <- numeric(n_sim_seq)
+  rejected <- logical(n_sim_seq)
+
+  for (sim in seq_len(n_sim_seq)) {
+    x1 <- rnorm(n_max_seq, mean = d / 2, sd = 1)
+    x2 <- rnorm(n_max_seq, mean = -d / 2, sd = 1)
+
+    stopped <- FALSE
+    for (nn in seq(check_every, n_max_seq, by = check_every)) {
+      safe_res <- safeTTest(x1[1:nn], x2[1:nn],
+                            designObj = design_t, pilot = FALSE)
+      if (safe_res$eValue >= 1 / alpha) {
+        stop_times[sim] <- nn
+        rejected[sim] <- TRUE
+        stopped <- TRUE
+        break
+      }
+    }
+
+    if (!stopped) {
+      stop_times[sim] <- n_max_seq
+      rejected[sim] <- FALSE
+    }
+  }
+
+  seq_results[[as.character(d)]] <- data.frame(
+    delta = d,
+    stop_time = stop_times,
+    rejected = rejected
+  )
+}
+
+df_seq <- do.call(rbind, seq_results)
+
+df_summary <- do.call(rbind, lapply(delta_seq, function(d) {
+  sub <- df_seq[df_seq$delta == d, ]
+  sub_rej <- sub[sub$rejected, ]
+  data.frame(
+    delta = d,
+    mean_stop = mean(sub$stop_time),
+    median_stop = median(sub$stop_time),
+    power_seq = mean(sub$rejected),
+    mean_stop_rejected = if (nrow(sub_rej) > 0) mean(sub_rej$stop_time) else NA_real_,
+    median_stop_rejected = if (nrow(sub_rej) > 0) median(sub_rej$stop_time) else NA_real_
+  )
+}))
+
+# Classical n for 80% power (two-sample, two-sided, equal variance)
+n_classical_ref <- sapply(delta_seq, function(d) {
+  ceiling(power.t.test(delta = d, sd = 1, sig.level = alpha, power = 0.80,
+                       type = "two.sample")$n)
+})
+df_classical <- data.frame(delta = delta_seq, n_classical = n_classical_ref)
+
+# Points to show in the figure
+df_points <- rbind(
+  data.frame(
+    delta = df_summary$delta,
+    value = df_summary$mean_stop,
+    stat = "Unconditional mean"
+  ),
+  data.frame(
+    delta = df_summary$delta,
+    value = df_summary$mean_stop_rejected,
+    stat = "Conditional mean (among rejections)"
+  ),
+  data.frame(
+    delta = df_classical$delta,
+    value = df_classical$n_classical,
+    stat = "Classical fixed n (80% power)"
+  )
+)
+
+# Extract conditional means for inline referencing
+cond_mean_05 <- round(df_summary$mean_stop_rejected[df_summary$delta == 0.5])
+cond_mean_08 <- round(df_summary$mean_stop_rejected[df_summary$delta == 0.8])
+n_rej_03 <- sum(df_seq$rejected[df_seq$delta == 0.3])
+```
+
+```{r}
+#| label: fig-safe-t-power-sequential
+#| echo: false
+#| fig-cap: "Realised sample sizes under the sequential safe t-test for three true effect sizes, based on 500 simulations per effect size. Monitoring is performed every 10 observations up to $n_{\\max} = 200$ per group; runs that do not reject by $n_{\\max}$ are recorded at 200. Blue circles mark the unconditional mean realised sample size. Dark-blue triangles mark the conditional mean realised sample size among runs that reject. Red diamonds mark the fixed sample size the classical equal-variance t-test requires for 80\\% power."
+#| fig-width: 7
+#| fig-height: 4.8
+
+df_seq$delta_label <- factor(
+  paste0("delta == ", df_seq$delta),
+  levels = paste0("delta == ", delta_seq)
+)
+
+df_points$delta_label <- factor(
+  paste0("delta == ", df_points$delta),
+  levels = paste0("delta == ", delta_seq)
+)
+
+ggplot(df_seq, aes(x = delta_label, y = stop_time)) +
+  geom_violin(fill = "steelblue", alpha = 0.25, scale = "width") +
+  geom_boxplot(width = 0.12, fill = "steelblue", alpha = 0.6,
+               outlier.size = 0.5) +
+  geom_point(
+    data = df_points,
+    aes(x = delta_label, y = value, color = stat, shape = stat),
+    size = 3.5
+  ) +
+  geom_text(
+    data = subset(df_points, stat == "Conditional mean (among rejections)"),
+    aes(x = delta_label, y = value, label = round(value), color = stat),
+    vjust = -0.8,
+    size = 3,
+    show.legend = FALSE
+  ) +
+  scale_x_discrete(labels = function(x) parse(text = x)) +
+  scale_color_manual(values = c(
+    "Unconditional mean" = "steelblue",
+    "Conditional mean (among rejections)" = "navy",
+    "Classical fixed n (80% power)" = "firebrick"
+  )) +
+  scale_shape_manual(values = c(
+    "Unconditional mean" = 16,
+    "Conditional mean (among rejections)" = 17,
+    "Classical fixed n (80% power)" = 18
+  )) +
+  labs(
+    x = "True standardised effect size",
+    y = "Realised sample size (n per group)",
+    title = "Realised sample size under periodic monitoring",
+    color = NULL,
+    shape = NULL
+  ) +
+  theme(legend.position = "bottom")
+```
+
+@fig-safe-t-power-sequential shows how the distribution of realised sample sizes changes with the true effect size. For $\delta = 0.3$, which is smaller than the design value $\delta_{\min} = 0.5$, many runs do not cross the rejection threshold before the administrative cap $n_{\max} = 200$, creating a large point mass at the cap. For larger effects, the distribution shifts downward, so the safe test more often rejects early and the realised sample size is frequently well below the maximum.
+
+The blue circles show the unconditional mean realised sample size, while the red diamonds show the fixed sample size the classical equal-variance t-test requires for $80\%$ power. The dark-blue triangles show the conditional mean realised sample size among runs that do reject. The red diamonds are reference values rather than an equal-power comparison, since the safe procedure's probability of rejecting by $n_{\max}$ varies with the true effect size. This distinction matters because the unconditional mean includes non-rejections capped at $n_{\max}$, whereas the conditional mean averages only over rejecting runs. Consequently, the unconditional mean is necessarily at least as large as the conditional mean among rejecting runs, even when successful rejections tend to occur early. For $\delta = 0.5$ and $\delta = 0.8$, the conditional mean stopping times are approximately `r cond_mean_05` and `r cond_mean_08` per group, respectively, well below the administrative cap $n_{\max} = 200$, showing that successful runs often terminate early. At $\delta = 0.3$ the rejection rate is much lower, so the corresponding triangle averages only `r n_rej_03` out of 500 simulated runs and should be read as indicative rather than precise.
+
+This is in line with the broader discussion in @grunwald2024safe and @ly2025savi. Safe tests typically pay a price in fixed-sample settings, but when sequential monitoring is allowed they may stop early under the alternative, so performance depends strongly on which criterion is used for comparison.
+
+### Optional stopping validity: simulation study
+
+We illustrate the type-I error behaviour of the safe t-test under continuous monitoring by simulation.
+```{r}
+#| label: fig-safe-t-fpr
+#| cache: true
+#| message: false
+#| warning: false
+#| fig-cap: "False positive rates under continuous monitoring for the safe t-test (blue) and the classical equal-variance t-test (red), based on 2000 simulations under the null ($\\delta = 0$)."
+#| fig-width: 7
+#| fig-height: 4
+n_max <- 100
+n_sim <- 2000
+
+fp_classical_t <- numeric(n_max)
+fp_safe_t <- numeric(n_max)
+
+# Design object for the safe t-test
+invisible(capture.output(
+  design_t_null <- designSafeT(deltaMin = 0.5, alpha = 0.05, beta = 0.2,
+                               testType = "twoSample", seed = 1)
+))
+
+set.seed(42)
+for (sim in 1:n_sim) {
+  x1 <- rnorm(n_max, mean = 0, sd = 1)
+  x2 <- rnorm(n_max, mean = 0, sd = 1)
+
+  ever_rej_classical <- FALSE
+  ever_rej_safe <- FALSE
+
+  for (nn in 10:n_max) {
+    # Classical equal-variance t-test
+    tt <- t.test(x1[1:nn], x2[1:nn], var.equal = TRUE)
+    if (tt$p.value < 0.05 && !ever_rej_classical) {
+      ever_rej_classical <- TRUE
+    }
+    if (ever_rej_classical) fp_classical_t[nn] <- fp_classical_t[nn] + 1
+
+    # Safe t-test
+    safe_result <- safeTTest(x1[1:nn], x2[1:nn],
+                             designObj = design_t_null, pilot = FALSE)
+    if (safe_result$eValue >= 20 && !ever_rej_safe) {
+      ever_rej_safe <- TRUE
+    }
+    if (ever_rej_safe) fp_safe_t[nn] <- fp_safe_t[nn] + 1
+  }
+}
+
+fp_classical_t <- fp_classical_t / n_sim * 100
+fp_safe_t <- fp_safe_t / n_sim * 100
+
+df_fpr_t <- data.frame(
+  n = rep(10:n_max, 2),
+  fpr = c(fp_classical_t[10:n_max], fp_safe_t[10:n_max]),
+  method = rep(c("Classical t-test (monitor p < 0.05)",
+                 "Safe t-test (monitor E >= 20)"), each = n_max - 9)
+)
+
+ggplot(df_fpr_t, aes(x = n, y = fpr, color = method)) +
+  geom_line(linewidth = 0.7) +
+  geom_hline(yintercept = 5, linetype = "dashed", color = "grey40") +
+  annotate("text", x = 80, y = 7, label = "alpha = 5%", size = 3,
+           color = "grey40") +
+  labs(x = "Number of looks / sample size per group",
+       y = "False positive rate (%)",
+       color = NULL) +
+  coord_cartesian(ylim = c(0, 50)) +
+  theme(legend.position = "bottom")
+```
+
+@fig-safe-t-fpr shows the same pattern as for the z-test. Under repeated monitoring, the classical equal-variance t-test shows substantial false positive inflation, whereas the safe t-test remains controlled at the nominal 5% level. In this simulation, the estimated false positive rate of the safe t-test stays close to and below the 5% boundary.
+
+This is the practical consequence of the e-process property formalised in @def-eprocess. Because the safe t-test produces an anytime-valid e-value process, Ville's inequality guarantees type-I error control under optional stopping. That is precisely what makes e-value-based tests suitable for experiments in which interim monitoring is desirable.
+
+## Safe tests for $2 \times 2$ tables {#sec-safe-2x2}
+
+The $2 \times 2$ contingency table is ubiquitous in biomedical research. Classical analyses typically rely on Fisher's exact test or Pearson's chi-squared test. The $2 \times 2$ case provides an important binary-data example of how the GRO/REGROW framework extends beyond Gaussian location models [@grunwald2024safe, Examples 2, 6, 7; @turner2024generic].
+
+### Setup
+
+Consider a $2 \times 2$ table where $Y_i \in \{0, 1\}$ is the outcome and $X_i \in \{a, b\}$ is the group indicator, with $n_a$ and $n_b$ observations in each group. A typical example is a clinical trial comparing a treatment ($a$) to a placebo ($b$), where $Y_i = 1$ indicates recovery. Let $\mu_{1|a}$ and $\mu_{1|b}$ denote the probabilities of outcome 1 in groups $a$ and $b$, respectively. The null hypothesis is
+$$
+H_0: \mu_{1|a} = \mu_{1|b},
+$$
+that is, the outcome distribution is the same in both groups. In the Bernoulli setting, equality of the outcome distributions is equivalent to equality of the success probabilities.
+
+### The simple-alternative case
+
+A useful starting point is the case in which the alternative is fixed, so that $(\mu_{1|a}, \mu_{1|b})$ is treated as known. In this setting, @grunwald2024safe (Example 2, Equation 14) show that the GRO e-variable takes the likelihood-ratio form
+$$
+E^* = \frac{p_{\mu_{1|a}, \mu_{1|b}}(Y \mid x)}{p_{\mu^\circ}(Y \mid x)},
+$$
+where
+$$
+\mu^\circ = \frac{n_a \mu_{1|a} + n_b \mu_{1|b}}{n_a + n_b}
+$$
+is the pooled success probability under the null. Here $p_{\mu_{1|a}, \mu_{1|b}}(Y \mid x)$ is the conditional likelihood given the fixed group labels $x$, and $p_{\mu^\circ}(Y \mid x)$ is the null likelihood under the Bernoulli model with common success probability $\mu^\circ$.
+
+Thus, in the simple-alternative case, the reverse information projection of the chosen alternative onto the null is the Bernoulli model with common success probability $\mu^\circ$. @grunwald2024safe note that this particular form of point-prior RIPr, at a weighted average of the group probabilities, is specific to contingency tables.
+
+### Composite alternatives and sequential testing
+
+Unlike the simple-alternative case, where the alternative probabilities are known and the RIPr has a closed form, the composite case requires handling unknown group-specific success probabilities while maintaining anytime validity. As discussed in @grunwald2024safe (Section 4.1, with Examples 6 and 7), the $2 \times 2$ case can be handled within the REGROW/GROW framework by separating nuisance and effect parameters. For practical sequential testing, the exact $k$-sample construction developed by @turner2024generic yields e-variables that allow optional stopping and can be implemented sequentially. This is the basis of the $2 \times 2$ functionality in `safestats`.
+
+### R implementation
+
+We illustrate the safe test for two proportions using the `safestats` package on a simulated dataset. We simulate $n = 500$ observation pairs from two groups with success probabilities $\mu_a = 0.5$ and $\mu_b = 0.3$. Thus, group $a$ has the higher success probability by $0.2$, and equivalently $\mu_b - \mu_a = -0.2$, which is the sign convention used by `designSafeTwoProportions()`.
+
+We explicitly set all four beta hyperparameters supplied to `designSafeTwoProportions()` to $1$. With `alternativeRestriction = "difference"` and $\delta=-0.2$, these hyperparameters tune the mixing distribution along the restricted alternative $\mu_{1|b}-\mu_{1|a}=-0.2$. They should not be described as independent $\mathrm{Beta}(1,1)$ priors on two unrestricted group probabilities. This is a user-specified choice. For balanced blocks in `safestats` 0.8.7, omitting the hyperparameters instead sets all four to $0.18$, the package's REGRET-optimised default. Other choices affect the speed of evidence accumulation but not the null-validity guarantee.
+
+```{r}
+#| label: safe-2x2-sim
+#| include: false
+set.seed(42)
+n_pairs <- 500
+mu_a <- 0.5
+mu_b <- 0.3
+
+y_a <- rbinom(n_pairs, size = 1, prob = mu_a)
+y_b <- rbinom(n_pairs, size = 1, prob = mu_b)
+
+invisible(capture.output(
+  design_2x2 <- designSafeTwoProportions(
+    na = 1, nb = 1,
+    alpha = 0.05,
+    beta = 0.2,
+    delta = -0.2,
+    alternativeRestriction = "difference",
+    hyperParameterValues = list(
+      betaA1 = 1, betaA2 = 1,
+      betaB1 = 1, betaB2 = 1
+    ),
+    M = 500
+  )
+))
+
+log_e_safe <- numeric(n_pairs)
+for (i in 1:n_pairs) {
+  res_i <- safeTwoProportionsTest(
+    ya = y_a[1:i],
+    yb = y_b[1:i],
+    designObj = design_2x2
+  )
+  log_e_safe[i] <- log(res_i$eValue)
+}
+
+first_crossing_2x2 <- which(log_e_safe >= log(20))[1]
+if (is.na(first_crossing_2x2)) {
+  crossing_msg_2x2 <- "the e-value did not cross the threshold within the simulated data"
+} else {
+  crossing_msg_2x2 <- paste0(
+    "the e-value first crossed the rejection threshold of $20$ at observation pair $",
+    first_crossing_2x2, "$"
+  )
+}
+```
+```{r}
+#| label: fig-safe-2x2
+#| echo: false
+#| fig-cap: "Sequential log e-value path for a simulated $2 \\times 2$ table with $\\mu_a = 0.5$ and $\\mu_b = 0.3$, computed using `safeTwoProportionsTest()` with design alternative $\\delta = \\mu_b - \\mu_a = -0.2$. The dashed line marks the rejection threshold $\\log(1/\\alpha) \\approx 3$."
+#| fig-width: 7
+#| fig-height: 4.5
+
+df_2x2 <- data.frame(
+  pair = 1:n_pairs,
+  log_e = log_e_safe
+)
+
+ggplot(df_2x2, aes(x = pair, y = log_e)) +
+  geom_line(color = "steelblue", linewidth = 0.7) +
+  geom_hline(yintercept = log(20), linetype = "dashed", color = "grey40") +
+  annotate("text", x = n_pairs * 0.75, y = log(20) + 0.5,
+           label = "log(1/alpha) at alpha = 0.05",
+           size = 3, color = "grey40") +
+  labs(x = "Number of observation pairs",
+       y = "log(e-value)") +
+  theme(legend.position = "bottom")
+```
+```{r}
+#| label: safe-2x2-classical
+#| echo: false
+tab <- matrix(c(sum(y_a), n_pairs - sum(y_a),
+                sum(y_b), n_pairs - sum(y_b)), nrow = 2, byrow = TRUE,
+              dimnames = list(c("Group A", "Group B"), c("Y=1", "Y=0")))
+fisher_result <- fisher.test(
+  tab,
+  alternative = "greater"
+)
+p_fisher <- fisher_result$p.value
+e_final_safe <- exp(log_e_safe[n_pairs])
+
+cat("Final 2x2 table:\n")
+print(tab)
+cat("\nFisher's exact test p-value:    ",
+    if (p_fisher < 1e-4) "< 1e-4" else formatC(p_fisher, format = "e", digits = 2),
+    "\n", sep = "")
+cat("Final safestats e-value:        ",
+    formatC(e_final_safe, format = "e", digits = 2), "\n", sep = "")
+cat("Reject at alpha = 0.05?         ",
+    ifelse(e_final_safe >= 20, "Yes", "No"), "\n", sep = "")
+```
+
+In the simulated path shown in @fig-safe-2x2, `r crossing_msg_2x2`. The classical one-sided Fisher's exact test also rejects the null on the complete dataset, but as with the other tests in this chapter, only the e-value path guarantees valid type-I error control under optional stopping. The `safeTwoProportionsTest()` implementation is based on the beta-binomial prior construction of @turner2024generic and is designed here for the directional alternative $\delta = \mu_b - \mu_a = -0.2$, using a blockwise one-from-each-group update scheme.
+
+
+## Safe logrank test {#sec-safe-logrank}
+
+The logrank test is a standard method for comparing survival curves, especially in clinical trials. It is also the setting where the benefits of safe testing are most compelling, because clinical trials involve patients, making early stopping both ethically important and practically desirable. The anytime-valid logrank test of @terschure2024safe is implemented in the `safestats` package [@turner2022safestats].
+
+### Why survival analysis needs safe tests
+
+In a two-arm clinical trial comparing a treatment to a control, the typical design involves periodic interim analyses where a Data Safety Monitoring Board (DSMB) reviews the accumulating evidence. With classical methods, the nominal type-I error guarantee generally relies on a pre-specified monitoring design using group-sequential boundaries such as O'Brien--Fleming [@obrien1979multiple] or alpha-spending approaches such as Lan--DeMets [@lan1983discrete]. If the schedule changes, because of slower-than-expected enrolment, for example, the analysis requires appropriate adjustment or re-design.
+
+Safe logrank tests remove the need to pre-specify a monitoring schedule for validity, although a maximum number of events may still be chosen for design and power planning. The analyst must still specify the testing direction and a clinically relevant design alternative such as $\mathrm{HR}_{\min}$. The freedom concerns the monitoring schedule rather than the model, since the guarantee still requires proportional hazards and censoring that is independent of survival time. Because the e-process remains valid at any stopping time with respect to its filtration, the DSMB can review the accumulating evidence at arbitrary times and frequencies, and recommend stopping whenever the evidence is compelling. We explore this in depth in the clinical trial case study in @sec-case-study.
+
+### Setup
+
+Consider a two-arm trial with $n$ subjects, where subject $i$ is assigned to treatment ($Z_i = 1$) or control ($Z_i = 0$). Let $T_i$ be the survival time and $C_i$ the censoring time, so we observe $\tilde{T}_i = \min(T_i, C_i)$ and the event indicator $D_i = \mathbf{1}\{T_i \leq C_i\}$. Under the proportional hazards model, the hazard function for subject $i$ is
+$$
+h(t \mid Z_i) = h_0(t) \exp(\theta Z_i),
+$$
+where $h_0(t)$ is the unspecified baseline hazard and the treatment effect is parameterised by the log hazard ratio $\theta = \log(\text{HR})$. The null hypothesis is $H_0: \theta = 0$ (no treatment effect). In @terschure2024safe, the treatment effect is often parameterised directly by the hazard ratio rather than its logarithm. Here we use the equivalent Cox-model notation $\theta = \log(\mathrm{HR})$.
+
+### The safe logrank e-process
+
+The safe logrank test of @terschure2024safe is constructed for sequential survival monitoring under a proportional hazards model and yields an e-process that remains valid under arbitrary stopping. Evidence is updated at event times through conditional likelihood contributions based on the current risk sets. At each event, the test contrasts how compatible the observed outcome is with the null and with a clinically relevant alternative. As in other safe tests, the design requires specifying a clinically relevant alternative, expressed through a hazard ratio $\text{HR}_{\min}$. We refer the reader to @terschure2024safe for the formal construction and its theoretical properties, and focus on the practical workflow below.
+
+In practice, the workflow is to choose the testing direction, specify a clinically relevant hazard ratio $\text{HR}_{\min}$, create the design object with `designSafeLogrank()`, evaluate the e-value at interim looks using `safeLogrankTest()`, and reject once $E \geq 1/\alpha$.
+
+### Illustration: event-by-event evidence accumulation
+
+To convey the basic logic, we show a hand-coded event-by-event likelihood-ratio path on simulated survival data and verify that it agrees with the package-based `safeLogrankTest()`. In the present continuous-time simulation with exponentially distributed event times, ties occur with probability zero, so the hand-coded path reproduces the event-by-event safe logrank update for the design alternative implemented by `safeLogrankTest()` in the basic two-arm no-ties setting, where each observed event contributes the ratio of its Cox partial-likelihood term under the design hazard ratio and under the null. In real applications, tied event times and other complications make the package implementation preferable. In the presence of ties, the noncentral-hypergeometric numerator approximates the alternative conditional likelihood, while the null conditional likelihood remains exact, so null validity and type-I error control are therefore preserved [@terschure2024safe].
+```{r}
+#| label: safe-logrank-sim
+#| include: false
+# Simulate survival data
+set.seed(2026)
+n_subj <- 400
+rate_control <- 0.1
+hr_true <- 0.7     # true hazard ratio (30% reduction)
+hr_design <- 0.8   # design alternative: minimum clinically relevant HR
+rate_treatment <- rate_control * hr_true
+
+group <- rep(c(0, 1), each = n_subj / 2)
+surv_time <- ifelse(group == 0,
+                    rexp(n_subj, rate = rate_control),
+                    rexp(n_subj, rate = rate_treatment))
+cens_time <- rexp(n_subj, rate = 0.03)
+obs_time <- pmin(surv_time, cens_time)
+event <- as.integer(surv_time <= cens_time)
+
+# Order by observed time
+ord <- order(obs_time)
+obs_time_sorted <- obs_time[ord]
+event_sorted <- event[ord]
+group_sorted <- group[ord]
+
+# Hand-coded eventwise LR path (exact in no-ties setting)
+theta_design <- log(hr_design)
+log_e_hand <- numeric(sum(event))
+event_count <- 0
+n_at_risk <- n_subj
+n_treat_at_risk <- sum(group == 1)
+n_control_at_risk <- sum(group == 0)
+log_e_cumulative <- 0
+
+for (i in 1:n_subj) {
+  if (event_sorted[i] == 1) {
+    event_count <- event_count + 1
+
+    p_null <- n_treat_at_risk / n_at_risk
+    p_alt <- (n_treat_at_risk * exp(theta_design)) /
+             (n_treat_at_risk * exp(theta_design) + n_control_at_risk)
+
+    is_treat <- group_sorted[i]
+    if (is_treat == 1) {
+      log_lr <- log(p_alt) - log(p_null)
+    } else {
+      log_lr <- log(1 - p_alt) - log(1 - p_null)
+    }
+
+    log_e_cumulative <- log_e_cumulative + log_lr
+    log_e_hand[event_count] <- log_e_cumulative
+  }
+
+  n_at_risk <- n_at_risk - 1
+  if (group_sorted[i] == 1) {
+    n_treat_at_risk <- n_treat_at_risk - 1
+  } else {
+    n_control_at_risk <- n_control_at_risk - 1
+  }
+}
+
+# Package-based safestats path for verification
+surv_data <- data.frame(time = obs_time, event = event, group = group)
+
+log_e_safe_lr <- NULL
+safe_lr_available <- FALSE
+
+if (requireNamespace("survival", quietly = TRUE) &&
+    requireNamespace("safestats", quietly = TRUE)) {
+  library(survival)
+
+  invisible(capture.output(
+    design_lr <- designSafeLogrank(
+      hrMin = hr_design,
+      alpha = 0.05,
+      alternative = "less"
+    )
+  ))
+
+  # Reconstruct sequential path: at each event time tau_j,
+  # administratively censor all subjects still at risk at tau_j
+  event_times <- sort(obs_time[event == 1])
+  log_e_safe_lr <- numeric(length(event_times))
+
+  for (j in seq_along(event_times)) {
+    tau_j <- event_times[j]
+
+    interim_data <- data.frame(
+      time = pmin(obs_time, tau_j),
+      event = as.integer(obs_time <= tau_j & event == 1),
+      group = group
+    )
+
+    res_j <- safeLogrankTest(
+      survival::Surv(time, event) ~ group,
+      data = interim_data,
+      designObj = design_lr
+    )
+
+    log_e_safe_lr[j] <- log(res_j$eValue)
+  }
+
+  safe_lr_available <- TRUE
+}
+
+# Verify agreement between hand-coded and package paths
+n_events <- length(log_e_hand)
+if (safe_lr_available && !is.null(log_e_safe_lr)) {
+  n_events_safe <- length(log_e_safe_lr)
+  n_compare <- min(n_events, n_events_safe)
+  max_diff_lr <- max(abs(log_e_hand[1:n_compare] - log_e_safe_lr[1:n_compare]),
+                     na.rm = TRUE)
+}
+```
+```{r}
+#| label: fig-safe-logrank
+#| echo: false
+#| fig-cap: "Sequential log e-value path for the safe logrank test on simulated survival data with true HR = 0.7, designed for HR$_{\\min}$ = 0.8. The hand-coded path and the `safeLogrankTest()` path agree to within numerical tolerance, so only the hand-coded path is shown."
+#| fig-width: 7
+#| fig-height: 4.5
+
+df_lr <- data.frame(
+  event_num = 1:n_events,
+  log_e = log_e_hand
+)
+
+ggplot(df_lr, aes(x = event_num, y = log_e)) +
+  geom_line(color = "steelblue", linewidth = 0.7) +
+  geom_hline(yintercept = log(20), linetype = "dashed", color = "grey40") +
+  annotate("text", x = n_events * 0.75, y = log(20) + 0.5,
+           label = "log(1/alpha) at alpha = 0.05",
+           size = 3, color = "grey40") +
+  labs(x = "Number of events observed",
+       y = "log(e-value)") +
+  theme(legend.position = "bottom")
+```
+```{r}
+#| label: safe-logrank-classical
+#| echo: false
+if (requireNamespace("survival", quietly = TRUE)) {
+  lr_test <- survival::survdiff(
+    survival::Surv(time, event) ~ group,
+    data = surv_data
+  )
+
+  idx_treatment <- grep(
+    "group=1",
+    names(lr_test$n),
+    fixed = TRUE
+  )
+
+  z_lr <- (
+    lr_test$obs[idx_treatment] -
+      lr_test$exp[idx_treatment]
+  ) / sqrt(
+    lr_test$var[idx_treatment, idx_treatment]
+  )
+
+  p_lr <- stats::pnorm(z_lr)
+
+  cat("Classical one-sided logrank test:\n")
+  cat("  z-statistic: ", round(z_lr, 3), "\n", sep = "")
+  cat("  p-value:     ",
+      if (p_lr < 1e-4) "< 1e-4" else formatC(p_lr, format = "e", digits = 2),
+      "\n", sep = "")
+}
+
+e_final_hand <- exp(log_e_hand[n_events])
+cat("\nFinal e-value (hand-coded): ",
+    formatC(e_final_hand, format = "e", digits = 2), "\n", sep = "")
+cat("Reject at alpha = 0.05?     ",
+    ifelse(e_final_hand >= 20, "Yes", "No"), "\n", sep = "")
+
+if (safe_lr_available) {
+  cat("\nMax |log(E_hand) - log(E_safestats)|: ",
+      formatC(max_diff_lr, digits = 2, format = "e"), "\n", sep = "")
+}
+```
+
+As @fig-safe-logrank shows, the hand-coded path and the reconstructed `safeLogrankTest()` path agree to within numerical tolerance in this no-ties simulation, so only the hand-coded path is plotted. The classical one-sided logrank test also rejects the null on the complete dataset, but only the e-value path guarantees valid type-I error control under arbitrary optional stopping, whereas classical group-sequential methods require a prespecified monitoring design.
+
+Note that the test is designed for a minimum clinically relevant hazard ratio of $0.8$, while the true data-generating hazard ratio is $0.7$. This separation between design alternative and truth mirrors the practice discussed throughout this chapter.
+
+### Advantages for clinical trials
+
+The safe logrank test offers three concrete advantages for clinical trials, as discussed in @terschure2024safe:
+
+1. **No pre-specified monitoring schedule.** The e-value can be computed after every event, and the decision to stop can be made at any time. This contrasts with group sequential methods, which typically rely on a pre-specified monitoring plan and corresponding alpha-spending or boundary calculations.
+
+2. **Optional continuation across studies.** E-values from separate looks or studies can be combined multiplicatively when each new contribution is conditionally valid given the preceding information under the same global null. Under this condition, the running product remains valid, as formalised in @sec-eprocesses. Fresh data are necessary, but do not by themselves establish conditional validity.
+
+3. **Ethical early stopping.** Because the e-value process is anytime-valid, a DSMB can support earlier stopping decisions while preserving valid type-I error control under continuous monitoring.
+
+These advantages are demonstrated in the full clinical trial case study in @sec-case-study, where we compare naive repeated testing with e-value monitoring.
+
+
+## A worked example: the exponential rate {#sec-safe-exponential}
+
+The safe tests so far have either been Gaussian (the z- and t-tests) or have required a dedicated construction (the $2 \times 2$ and logrank tests). To show that the framework is not tied to any one of these settings, we now work through a fresh example from first principles, namely a safe test for the rate of an exponential distribution. The exponential is a natural choice. It is the canonical model for waiting times and lifetimes, so it connects to the survival setting of @sec-safe-logrank. It is also a one-parameter exponential family with monotone likelihood ratio, so @prp-grow-expfam applies and we can derive the GROW e-variable, verify its validity over the composite null, and compute its growth rate in closed form by hand. This makes it a useful consolidation of the ideas in this chapter and in @sec-foundations.
+
+
+### Setup
+
+Suppose we observe lifetimes $X_1, X_2, \ldots \overset{\text{iid}}{\sim} \mathrm{Exp}(\lambda)$, with density $p_\lambda(x) = \lambda e^{-\lambda x}$ for $x \geq 0$. The scientifically natural parameter here is the **mean lifetime** $\eta = 1/\lambda$, since reliability and survival questions are typically phrased in terms of how long things last rather than how often they fail. A larger mean lifetime corresponds to a smaller rate and represents a more durable or longer-surviving population. Consider a context in which $\eta_0$ is a known baseline mean lifetime and a worthwhile improvement would lengthen it to some $\eta_1 > \eta_0$. As with the other safe tests, we separate null and alternative by a pre-specified minimum relevant effect, here the gap between $\eta_0$ and $\eta_1$. We test
+$$
+H_0 : \eta \leq \eta_0
+\qquad \text{against} \qquad
+H_1 : \eta \geq \eta_1 ,
+\qquad \eta_1 > \eta_0 .
+$$
+Writing $\lambda_0 = 1/\eta_0$ and $\lambda_1 = 1/\eta_1$, the same hypotheses read $H_0 : \lambda \geq \lambda_0$ against $H_1 : \lambda \leq \lambda_1$ in terms of the rate, with $\lambda_1 < \lambda_0$. Stating the hypotheses in $\eta$ keeps the direction of the alternative aligned with the direction of scientific interest, namely that longer lifetime is the improvement. It also matches the orientation of @prp-grow-expfam, where the alternative sits on the larger side of the parameter. The exponential density is most compactly expressed in $\lambda$, so the derivations below are carried out in the rate.
+
+### The GROW e-variable
+
+The family $\{\mathrm{Exp}(\lambda) : \lambda > 0\}$ is a one-parameter exponential family, and the mean lifetime $\eta = 1/\lambda$ is a monotone reparameterisation of the rate. The likelihood ratio between two rates is monotone in the sufficient statistic $S_n = \sum_{i=1}^n X_i$, since increasing the mean lifetime (decreasing the rate) stochastically increases the lifetimes and therefore $S_n$. This is exactly the monotone-likelihood-ratio structure required by @prp-grow-expfam, and the property is preserved under the monotone reparameterisation from $\lambda$ to $\eta$, so the proposition applies equally with the family reindexed by mean lifetime. Taking the mean lifetime as the parameter, with null boundary $\eta_0$ and alternative boundary $\eta_1$, the proposition tells us that the GROW e-variable is the likelihood ratio between the two boundary distributions. In terms of the corresponding rates $\lambda_1 = 1/\eta_1$ and $\lambda_0 = 1/\eta_0$,
+$$
+E_n
+= \frac{p_{\lambda_1}(X^n)}{p_{\lambda_0}(X^n)}
+= \prod_{i=1}^n \frac{\lambda_1 e^{-\lambda_1 X_i}}{\lambda_0 e^{-\lambda_0 X_i}}
+= \left(\frac{\lambda_1}{\lambda_0}\right)^{n}
+  \exp\!\bigl((\lambda_0 - \lambda_1)\, S_n\bigr).
+$$
+Because $\lambda_0 > \lambda_1$, the coefficient $\lambda_0 - \lambda_1$ is positive, so $E_n$ is increasing in the total lifetime $S_n$, so a long total lifetime is evidence for the longer mean lifetime, and the e-value grows accordingly. This is the exponential analogue of the Gaussian likelihood-ratio e-variable from @sec-lr-gaussian, with the total lifetime $S_n$ playing the role of the Gaussian sum.
+
+### Validity across the composite null
+
+It is worth checking by hand that $E_n$ is a genuine e-variable for the *whole* composite null, not merely at the boundary. Since the observations are independent and the same one-step factor is used at each time point, it suffices to compute the expectation of a single factor under an arbitrary true rate $\lambda$. For $\lambda > \lambda_0 - \lambda_1$, which holds throughout the null and ensures the integral below converges, standard evaluation of $\int_0^\infty e^{-cx}\, dx = 1/c$ gives
+$$
+\mathbb{E}_\lambda\!\left[\frac{\lambda_1 e^{-\lambda_1 X}}{\lambda_0 e^{-\lambda_0 X}}\right]
+= \frac{\lambda_1}{\lambda_0}\,\lambda \int_0^\infty
+  e^{-(\lambda_1 - \lambda_0 + \lambda)x}\, dx
+= \frac{\lambda_1 \lambda}{\lambda_0\,(\lambda - \lambda_0 + \lambda_1)} .
+$$
+Two features of this expression matter. First, at the boundary $\lambda = \lambda_0$ it equals exactly $1$, so each factor is an *exact* e-variable there. Second, a short rearrangement shows that the expression is at most $1$ if and only if $\lambda \geq \lambda_0$, that is, if and only if $\eta \leq \eta_0$, precisely the null. The expectation therefore increases as the rate falls below $\lambda_0$ (the mean lifetime rising into the alternative) and decreases as the rate grows beyond it. For still smaller rates $\lambda \leq \lambda_0 - \lambda_1$ the expectation may be infinite, but this does not affect e-validity, which only requires the expectation bound under $H_0$.
+
+The boundary rate $\lambda_0$ is thus the *least favourable* null distribution, the hardest point in the null to distinguish from the alternative, and the e-variable is calibrated against it. This is a concrete, hand-verifiable instance of the reverse information projection discussed abstractly in @sec-safe-framework. For the boundary alternative $\mathrm{Exp}(\lambda_1)$, the reverse information projection onto the null set $\{\mathrm{Exp}(\lambda) : \lambda \geq \lambda_0\}$ is the boundary distribution $\mathrm{Exp}(\lambda_0)$.
+
+Finally, since each factor satisfies $\mathbb{E}_{\lambda_0}[\,\cdot \mid \mathcal{F}_{i-1}] = 1$ at the boundary and $\leq 1$ throughout the null, it is a conditional e-variable in the sense of @def-conditional-evalue. The running product $E_n$ is therefore a test supermartingale under every null rate, so Ville's inequality (@thm-ville) delivers anytime validity without any further work. This is the common backbone of @sec-common-backbone, instantiated for the exponential.
+
+### Growth rate equals the KL divergence
+
+How quickly does the evidence accumulate when the alternative is true? Following the e-power discussion of @sec-epower, the relevant quantity is the expected log-increment per observation under the alternative. With data generated at the design rate $\lambda_1$, a direct calculation using $\mathbb{E}_{\lambda_1}[X] = 1/\lambda_1$ gives
+$$
+\mathbb{E}_{\lambda_1}[\log E_1]
+= \log\!\frac{\lambda_1}{\lambda_0} + (\lambda_0 - \lambda_1)\,
+  \mathbb{E}_{\lambda_1}[X]
+= \frac{\lambda_0}{\lambda_1} - 1 - \log\frac{\lambda_0}{\lambda_1}
+= \mathrm{KL}\bigl(\mathrm{Exp}(\lambda_1)\,\|\,\mathrm{Exp}(\lambda_0)\bigr).
+$$
+Writing $r = \lambda_0/\lambda_1 = \eta_1/\eta_0 > 1$, this is $r - 1 - \log r$, which is strictly positive whenever $r \neq 1$. The e-process therefore has positive expected log-growth under the design alternative, accumulating evidence at the rate of the KL divergence between the alternative and null boundary distributions. This makes explicit the log-optimality of the likelihood ratio established in @thm-logoptimal, now specialised to the exponential, where the optimal growth rate is the KL divergence, and every term in it is available in closed form.
+
+### Implementation
+
+We implement the test by hand, computing the running log e-value as a cumulative sum of one-step log factors. No special package is needed, which is part of the point. Once the one-step factor is identified, the rest is the generic supermartingale construction.
+
+```{r}
+#| label: safe-exp-path
+# Hypotheses stated through the mean lifetime eta = 1 / lambda
+eta0 <- 1.0          # baseline mean lifetime (null boundary)
+eta1 <- 1 / 0.7      # alternative boundary: longer mean lifetime
+lambda0 <- 1 / eta0  # null boundary rate
+lambda1 <- 1 / eta1  # alternative boundary rate (lower rate)
+lambda_true <- lambda1  # data generated at the alternative boundary
+
+alpha <- 0.05
+log_threshold <- log(1 / alpha)
+
+n <- 200
+set.seed(2026)
+x <- rexp(n, rate = lambda_true)
+
+# One-step log factor: log(lambda1 / lambda0) + (lambda0 - lambda1) * x_i
+log_factor <- log(lambda1 / lambda0) + (lambda0 - lambda1) * x
+log_e <- cumsum(log_factor)
+
+# Closed-form per-step growth rate (KL divergence) for reference
+kl <- lambda0 / lambda1 - 1 - log(lambda0 / lambda1)
+cat("Per-step growth rate KL(Exp(lambda1) || Exp(lambda0)):",
+    round(kl, 4), "\n")
+
+first_cross <- which(log_e >= log_threshold)
+first_cross <- if (length(first_cross) == 0) NA_integer_ else first_cross[1]
+cat("First crossing of log(1/alpha):", first_cross, "\n")
+```
+
+```{r}
+#| label: fig-safe-exp-path
+#| echo: false
+#| fig-cap: "Sequential log e-value path for the safe exponential-rate test under the alternative boundary (mean lifetime $\\eta_1 = 1/0.7$, rate $\\lambda_1 = 0.7$), with null boundary $\\eta_0 = 1$ ($\\lambda_0 = 1$). The dashed line marks the rejection threshold $\\log(1/\\alpha) \\approx 3$ at $\\alpha = 0.05$. Under the alternative the path has positive expected drift equal to the KL divergence per observation."
+#| fig-width: 7
+#| fig-height: 4
+
+df_exp <- data.frame(n = 1:n, log_e = log_e)
+
+ggplot(df_exp, aes(x = n, y = log_e)) +
+  geom_line(color = "steelblue", linewidth = 0.7) +
+  geom_hline(yintercept = log_threshold, linetype = "dashed", color = "grey40") +
+  annotate("text", x = n * 0.9, y = log_threshold + 0.6,
+           label = "log(1/alpha) at alpha = 0.05",
+           hjust = 1, size = 3, color = "grey40") +
+  labs(x = "Number of observations", y = "log(e-value)") +
+  theme(legend.position = "bottom")
+```
+
+@fig-safe-exp-path shows the resulting log e-value path under the design alternative.
+
+To illustrate anytime validity, we check the type-I error at the least-favourable null rate $\lambda = \lambda_0$, where the process is an exact test martingale. We simulate many data streams, monitor the e-value after every observation up to $n_{\max} = 500$, and record how often it ever crosses the threshold.
+
+```{r}
+#| label: safe-exp-fpr
+n_max <- 500
+n_sim <- 5000
+set.seed(123)
+
+ever_rejected <- replicate(n_sim, {
+  x0 <- rexp(n_max, rate = lambda0)   # data simulated under the null boundary
+  log_e0 <- cumsum(log(lambda1 / lambda0) + (lambda0 - lambda1) * x0)
+  any(log_e0 >= log_threshold)
+})
+
+p_hat <- mean(ever_rejected)
+cat("Estimated P(reject by n_max under the null boundary):",
+    round(p_hat, 4),
+    "(Ville bound:", alpha, ")\n")
+```
+
+In this simulation, the estimated probability of ever crossing the threshold by $n_{\max} = 500$ is compatible with the nominal $5\%$ level, up to Monte Carlo error. Ville's inequality gives the actual guarantee, $P_\lambda(\sup_n E_n \geq 1/\alpha) \leq \alpha$ for every $\lambda \geq \lambda_0$, and the simulation is an illustration rather than the source of the bound. As with the z-test in @fig-safe-z-fpr, repeatedly monitoring a classical fixed-horizon test can inflate its type-I error well beyond $\alpha$, whereas the safe test avoids this by construction.
+
+### Remark: a confidence sequence for the rate
+
+The same inversion principle can be used to construct a confidence sequence for $\lambda$ (equivalently for the mean lifetime $\eta$), in the manner developed in the next chapter (@sec-confidence-sequences). For each candidate rate $\ell > 0$, one can test the point null $H_0: \lambda = \ell$ using a mixture likelihood-ratio e-process
+$$
+M_n^{(\ell)}
+=
+\int \frac{p_{\lambda'}(X^n)}{p_{\ell}(X^n)}\, \pi(d\lambda') ,
+$$
+where a gamma mixing distribution over $\lambda'$ is conjugate for the exponential rate model and gives a closed form. The set $C_n = \{\ell > 0 : M_n^{(\ell)} < 1/\alpha\}$ is then an anytime-valid confidence sequence for the rate. We do not pursue the derivation here. The point is that the exponential example follows the same general backbone of @sec-common-backbone (construct an e-process, apply Ville's inequality, and invert the resulting family of tests), and provides a natural parametric companion to the Gaussian confidence sequence of @sec-gaussian-cs.
+
+## Summary and comparison {#sec-safe-summary}
+
+This chapter showed that several classical tests admit safe e-value analogues that retain type-I error control under arbitrary stopping while often preserving good efficiency. The following table summarises the key properties.
+
+```{=latex}
+\begin{table}[H]
+\centering
+\caption{Summary of safe tests for classical problems.}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lp{2.6cm}p{3.4cm}lp{2.4cm}@{}}
+\toprule
+Test & Nuisance & Design principle & Function & Reference \\
+\midrule
+z-test & None ($\sigma$ known) & Exact GROW & \texttt{safeZTest} & Grünwald et al.\ (2024) \\
+t-test & Unknown $\sigma$ & REGROW/GROW, right-Haar prior & \texttt{safeTTest} & Grünwald et al.\ (2024) \\
+$2 \times 2$ table & Marginal probabilities & Motivated by GROW/REGROW & \texttt{safeTwoProportions}\allowbreak\texttt{Test} & Turner et al.\ (2024) \\
+Logrank & Baseline hazard & Conditional likelihood & \texttt{safeLogrankTest} & ter Schure et al.\ (2024) \\
+\bottomrule
+\end{tabular}}
+\end{table}
+```
+
+The common pattern across these tests is:
+
+1. **Validity comes from the e-process property.** If the running e-value process is valid under the null, in the sense formalised in the next chapter, then Ville's inequality guarantees type-I error control under any stopping rule.
+
+2. **Efficiency is guided by growth-rate optimality.** The GROW and REGROW criteria of @grunwald2024safe provide a principled way to choose e-variables that accumulate evidence efficiently, where these criteria are available. The degree of formal optimality varies across settings. The z-test admits an exact GROW result, the t-test has strong optimality properties via the Haar prior, and the $2 \times 2$ and logrank constructions are motivated by the same principles but involve additional practical considerations.
+
+3. **The cost is often a larger worst-case sample size.** The price of optional-stopping robustness is often a larger planned sample size, and fixed-horizon power can be lower than that of a classical test designed for the same setting. As shown in the t-test simulations of @sec-safe-t-power, whether this cost is offset by early stopping depends on the true effect size, the design parameters, and the monitoring frequency.
+
+4. **Software support is available.** The `safestats` R package [@turner2022safestats] provides implementations of all four tests discussed in this chapter, with design functions that compute planned sample sizes and tuning parameters.
+
+In the next chapter, we move from these test-specific constructions to the general sequential framework behind them, showing how e-processes and confidence sequences provide a unified language for anytime-valid inference beyond the individual examples studied here.

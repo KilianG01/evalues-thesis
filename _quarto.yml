@@ -1,0 +1,61 @@
+project:
+  type: book
+
+execute:
+  freeze: auto
+
+book:
+  title: "Robustness and Reliability in Sequential Analysis: A Comparative Evaluation of E-Values and Standard Significance Testing"
+  chapters:
+    - index.qmd
+    - 01_introduction.qmd
+    - 02_chapter1.qmd
+    - 03_chapter2.qmd
+    - 04_chapter3.qmd
+    - 05_chapter4.qmd
+    - 06_chapter5.qmd
+    - 07_chapter6.qmd
+    - 99_bibliography.qmd
+
+thesis:
+  type: "Master Thesis"
+  student: "Kilian Graef"
+  period: "Summer 2026"
+  mainreader: "Lukas Meier"
+  date: "31 August 2026"
+  # dedication: "To some special person"
+
+bibliography: myReferences.bib
+
+format:
+  pdf:
+    pdf-engine: pdflatex
+    template: "latex/my-template.tex"
+    keep-tex: true
+    highlight-style: tango
+    include-in-header:
+      - text: |
+          \usepackage{tabularx}
+          \usepackage{tikz}
+          \usetikzlibrary{positioning,arrows.meta,fit,backgrounds}
+          \usepackage{float}
+          \tikzset{
+            backbone-step/.style={
+              draw, rounded corners=2pt, align=center,
+              minimum width=58mm, minimum height=11mm,
+              fill=gray!5
+            },
+            backbone-tests/.style={
+              draw, rounded corners=2pt, align=left,
+              minimum width=46mm, minimum height=22mm,
+              fill=blue!4
+            },
+            backbone-test/.style={
+              draw, rounded corners=2pt, align=center,
+              minimum width=32mm, minimum height=8mm,
+              fill=blue!5, font=\footnotesize
+            },
+            backbone-arr/.style={->, thick, gray!70!black},
+            backbone-sidearr/.style={->, thick, gray!70!black, dashed},
+            backbone-sidearr-solid/.style={->, thick, gray!60!black}
+          }

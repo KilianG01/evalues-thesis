@@ -1,0 +1,194 @@
+\documentclass[11pt,a4paper,oneside]{report}
+%%%--- Template for master thesis at SfS
+%%%--- Modified template with more comments and examples -- SG, 11/06/09
+%%%------
+\usepackage[english]{ETHDAsfs}%--> ETHDASA + fancyhdr + ... "umlaute"
+%  + sfs-hyper -> hyperref 
+\usepackage{amsmath}
+\numberwithin{equation}{chapter}
+\usepackage{amsbsy}%% for \boldsymbol and \pmb{.}
+\usepackage{amssymb}%% calls  amsfonts...
+\usepackage{fvextra}
+\usepackage{xcolor}
+\definecolor{shadecolor}{RGB}{248,248,248}
+\usepackage{pdfpages}%% to include the declaration of originality
+\usepackage[utf8]{inputenc}% <<------- Unicode, *NOT* iso-latin1 !
+\usepackage{lmodern}
+\usepackage{enumerate}% Fuer selbstdefinierte Nummerierungen
+\usepackage{relsize}%-> \smaller (etc) used here
+\usepackage{etoolbox}
+\BeforeBeginEnvironment{example}{\medskip}
+\AfterEndEnvironment{example}{\medskip}
+\usepackage{float}
+\floatplacement{table}{H}%% Quarto's table wrapper carries no placement; make H the default
+\AtBeginDocument{\hypersetup{%
+  pdftitle={Robustness and Reliability in Sequential Analysis: A Comparative Evaluation of E-Values and Standard Significance Testing},
+  pdfauthor={Kilian Graef}%
+}}
+
+%%------- Theoreme ---
+%% definition, lemma, theorem, corollary, proposition, example
+%% are now created automatically by Quarto/Pandoc crossref system.
+%% Only non-standard environments (note, remark) are defined
+%% further below, after the Pandoc preamble injection point.
+
+\DeclareMathOperator*{\plim}{plim}
+% \def\MR#1{\href{http://www.ams.org/mathscinet-getitem?mr=#1}{MR#1}}
+
+% \newcommand{\Lecture}[3]{\marginpar{#3.#2.#1}}
+% \newcommand{\Fu}{\mathcal{F}}
+\newcommand{\aatop}[2]{\genfrac{}{}{0pt}{}{#1}{#2}}
+
+%\renewcommand{\theequation}{\arabic{equation}}
+\numberwithin{equation}{subsection}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Path for your figures                      %%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Set the paths where all figures are taken from:
+\graphicspath{{Pictures/}}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Define your own commands here             %%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newcommand{\Bruch}[2]{{}^{#1}\!\!/\!_{#2}}
+\renewcommand{\labelenumi}{\roman{enumi}.)}
+
+$pandoc.tex()$
+
+%% Improve spacing around theorem-like environments
+\BeforeBeginEnvironment{definition}{\vspace{0.5\baselineskip}}
+\AfterEndEnvironment{definition}{\vspace{0.3\baselineskip}}
+\BeforeBeginEnvironment{proposition}{\vspace{0.5\baselineskip}}
+\AfterEndEnvironment{proposition}{\vspace{0.3\baselineskip}}
+\BeforeBeginEnvironment{theorem}{\vspace{0.5\baselineskip}}
+\AfterEndEnvironment{theorem}{\vspace{0.3\baselineskip}}
+
+%% Bibliography support for Pandoc/citeproc
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\makeatletter
+\@ifundefined{CSLReferences}{%
+  \newlength{\cslhangindent}
+  \setlength{\cslhangindent}{1.5em}
+  \newlength{\csllabelwidth}
+  \setlength{\csllabelwidth}{3em}
+  \newenvironment{CSLReferences}[2]
+    {\begin{list}{}{\setlength{\itemindent}{0pt}
+     \setlength{\leftmargin}{0pt}
+     \setlength{\parsep}{0pt}
+     \setlength{\itemsep}{\parskip}
+     \ifodd #1
+      \setlength{\leftmargin}{\cslhangindent}
+      \setlength{\itemindent}{-\cslhangindent}
+     \fi
+     \ifnum #2 > 0
+      \setlength{\leftmargin}{\csllabelwidth}
+     \fi}}
+    {\end{list}}
+  \newcommand{\CSLBlock}[1]{\hfill\break#1\hfill\break}
+  \newcommand{\CSLLeftMargin}[1]{\parbox[t]{\csllabelwidth}{\strut#1\strut}}
+  \newcommand{\CSLRightInline}[1]{\parbox[t]{\dimexpr\linewidth-\csllabelwidth\relax}{\strut#1\strut}}
+  \newcommand{\CSLIndent}[1]{\hspace{\cslhangindent}#1}
+}{}
+\makeatother
+
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+  breaklines,
+  breakanywhere,
+  commandchars=\\\{\},
+  frame=single,
+  framesep=3mm,
+  rulecolor=\color{gray!40},
+  bgcolor=shadecolor,
+  fontsize=\small
+}
+
+\numberwithin{equation}{chapter}
+
+\begin{document}
+
+\bibliographystyle{chicago}% ---> Hampel,F., E.Ronchetti,... W.Stahel(1986) ...
+% was \bibliographystyle{sfsbib}\citationstyle{dcu}
+% OR DEFAULT: \citationstyle{agsm}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Front matter                               %%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\pagenumbering{roman}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Title page                                %%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\period{$thesis.period$}
+\dasatype{$thesis.type$}
+\students{$thesis.student$}
+
+\mainreaderprefix{Advisor:}
+\mainreader{$thesis.mainreader$}
+
+$if(thesis.coreader)$
+\alternatereaderprefix{Co-Advisor:}
+\alternatereader{$thesis.coreader$}
+$else$
+\alternatereaderprefix{}%% suppress the default "Adviser:" label from ETHDASA.str
+$endif$
+
+\submissiondate{$thesis.date$}
+\title{$book.title$}
+
+\maketitle
+\clearpage
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Optional dedication                       %%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+$if(thesis.dedication)$
+\markright{}
+\vspace*{\stretch{1}}
+\begin{center}
+  $thesis.dedication$
+\end{center}
+\vspace*{\stretch{2}}
+\clearpage
+$endif$
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Book body                                  %%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% IMPORTANT:
+% - index.qmd contains the unnumbered Abstract.
+% - At the END of index.qmd, insert the raw LaTeX block:
+%
+%   \clearpage
+%   \tableofcontents
+%   \clearpage
+%   \pagenumbering{arabic}
+%
+% This gives the order:
+% Title page -> Abstract -> Table of contents -> Introduction.
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+$body$
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Declaration of originality                %%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Keep confirmation-originality-scan.pdf in the project root,
+% next to _quarto.yml. It is inserted as unnumbered end matter.
+
+\clearpage
+\includepdf[
+  pages=1,
+  pagecommand={
+    \thispagestyle{plain}
+    \phantomsection
+    \addcontentsline{toc}{chapter}{Declaration of Originality}
+  }
+]{confirmation-originality-scan.pdf}
+
+\end{document}

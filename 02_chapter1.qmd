@@ -1,0 +1,817 @@
+# Foundations of E-Values {#sec-foundations}
+
+```{r}
+#| label: setup-ch2
+#| include: false
+set.seed(2026)
+library(ggplot2)
+theme_set(theme_minimal(base_size = 12))
+```
+
+In classical statistics, the p-value remains the default testing summary for evidence against a null hypothesis. Yet its interpretation is notoriously subtle. An unadjusted analysis under optional stopping does not retain its nominal guarantee, and combining dependent p-values requires dedicated procedures that may be conservative. E-values offer a complementary framework for quantifying evidence. This chapter introduces the core concepts, building from definitions to intuition and first comparisons with p-values. Each concept is accompanied by R code to make the ideas concrete.
+
+## Setup and notation {#sec-setup}
+
+We work on a sample space $\Omega$ equipped with a $\sigma$-algebra $\mathcal{F}$. Let $\mathcal{M}_1$ denote the set of all probability measures on $(\Omega, \mathcal{F})$. Some unknown distribution $P^\dagger \in \mathcal{M}_1$ governs our data $X$, which may be a single observation or a vector $(X_1, \dots, X_n)$. When this distribution belongs to a parametric family, we write $\theta^\dagger$ for the true parameter value.
+
+::: {#def-hypothesis}
+## Hypothesis [adapted from @ramdas2024hypothesis, Definition 1.1]
+A **hypothesis** is a set of probability measures in $\mathcal{M}_1$. A hypothesis is **simple** if it is a singleton $\{P\}$. Otherwise, it is **composite**.
+:::
+
+Throughout, we write $\mathcal{P}$ for the null hypothesis and $\mathcal{Q}$ for the alternative hypothesis, and use $P, Q$ for individual distributions within these sets. The null hypothesis $H_0$ is the claim that $P^\dagger \in \mathcal{P}$, and the alternative $H_1$ is the claim that $P^\dagger \in \mathcal{Q}$.
+
+**Example:** Suppose our data $X$ is normally distributed with an unknown mean $\mu$ and a known variance of $1$. If we test the claim that the mean is exactly zero, this forms a **simple** null hypothesis because it specifies a single, exact distribution: $\mathcal{P} = \{\mathcal{N}(0, 1)\}$. If we test the claim that the mean is strictly positive, this forms a **composite** alternative hypothesis because it encompasses an infinite set of possible distributions: $\mathcal{Q} = \{\mathcal{N}(\mu, 1) \mid \mu > 0\}$.
+
+
+## What are e-variables and e-values? {#sec-evalue-definition}
+
+The central definition of this thesis is remarkably simple.
+
+::: {#def-evar}
+## E-variables, p-variables, and tests [adapted from @ramdas2024hypothesis, Definition 1.2]
+
+Let $\mathcal{P} \subseteq \mathcal{M}_1$ be the null hypothesis.
+
+(i) An **e-variable** $E$ for $\mathcal{P}$ is a $[0, \infty]$-valued random variable satisfying
+$$\mathbb{E}_P[E] \leq 1 \quad \text{for all } P \in \mathcal{P}.$$
+An e-variable is **exact** if $\mathbb{E}_P[E] = 1$ for all $P \in \mathcal{P}$.
+
+(ii) A **p-variable** $U$ for $\mathcal{P}$ is a $[0, \infty)$-valued random variable satisfying
+$$P(U \leq \alpha) \leq \alpha \quad \text{for all } \alpha \in (0, 1) \text{ and all } P \in \mathcal{P}.$$
+The $[0, \infty)$ convention follows @ramdas2024hypothesis; classical expositions more commonly restrict attention to $[0, 1]$-valued p-variables, but the distinction is immaterial here since any $[0, \infty)$-valued p-variable can be truncated to $[0, 1]$ without affecting the defining inequality.
+
+(iii) A **test** $\varphi$ is a $[0, 1]$-valued random variable. It has **level** $\alpha$ for $\mathcal{P}$ if $\mathbb{E}_P[\varphi] \leq \alpha$ for every $P \in \mathcal{P}$.
+:::
+
+The value taken by the e-variable upon observing the data is called an **e-value**. The "e" stands for both *expectation* (the defining property) and *evidence* (the interpretation).
+
+The literature sometimes uses "e-value" for both the random statistic and its realised value. This thesis retains the distinction in formal definitions and mathematical statements, while occasionally using the shorter terminology in applied discussion when no ambiguity can arise.
+
+The constraint on e-variables is an **expectation** constraint: $\mathbb{E}_P[E] \leq 1$. The constraint on p-variables is a **probability** constraint: $P(U \leq \alpha) \leq \alpha$. This seemingly small difference has profound consequences for how the two quantities can be used, combined, and interpreted.
+
+Several points deserve emphasis:
+
+- The **trivial e-variable** $E \equiv 1$ is always valid for any $\mathcal{P}$. It provides no evidence against the null, but it establishes that at least one e-variable always exists.
+- An e-variable is allowed to take the value $\infty$, but only on events that have probability zero under every $P \in \mathcal{P}$.
+- Unlike p-values, **larger e-values indicate stronger evidence** against the null. For simple-vs-simple likelihood-ratio e-values, an e-value of 20 means that the observed data are 20 times as likely under the alternative as under the null. For general e-values, the interpretation is that Markov's inequality guarantees a p-value of at most $1/20 = 0.05$.
+- E-values and p-values are *not* on the same scale. We should not simply compare $E$ with $1/p$ for a p-value $p$; as we will see when discussing calibrators, the conversion between the two inherently loses information.
+
+
+## From e-values to tests: Markov's inequality {#sec-markov}
+
+The most immediate use of an e-value is as a test statistic. The bridge is Markov's inequality, which gives us a level-$\alpha$ test for free.
+
+::: {#prp-markov}
+## Markov's inequality for e-values (@ramdas2024hypothesis, Proposition 2.1)
+Let $E$ be an e-variable for $\mathcal{P}$. Then for all $P \in \mathcal{P}$ and $\alpha \in (0, 1]$,
+$$P(E \geq 1/\alpha) \leq \alpha.$$
+Hence:
+
+- $1/E$ is a p-variable for $\mathcal{P}$,
+- $\mathbf{1}\{E \geq 1/\alpha\}$ is a level-$\alpha$ binary test.
+:::
+
+::: {.proof}
+Since $\mathbf{1}\{x \geq 1\} \leq x$ for all $x \geq 0$ (the indicator of exceeding 1 is bounded by the value itself), we have $P(E \geq 1/\alpha) = \mathbb{E}_P[\mathbf{1}\{\alpha E \geq 1\}] \leq \mathbb{E}_P[\alpha E] = \alpha \, \mathbb{E}_P[E] \leq \alpha.$
+:::
+
+In words: **reject the null whenever the e-value exceeds $1/\alpha$**. At $\alpha = 0.05$, we reject when $E \geq 20$. At $\alpha = 0.01$, we reject when $E \geq 100$.
+
+The Markov rule is universally valid, but it is often **conservative**, because Markov's inequality is loose for many e-variables. In such cases the rejection probability under the null falls below $\alpha$, and fixed-sample power can be lower than for a test calibrated to the full null distribution. How much is lost depends on the choice of e-variable, not on the formalism itself, as @sec-power-cost explains. If the distribution of $E$ under the null is known, one can use a tighter threshold [@ramdas2024hypothesis, Section 2.2]; otherwise $1/\alpha$ remains the universally valid default.
+
+
+## The betting interpretation {#sec-betting}
+
+E-values have a natural interpretation as **bets against the null hypothesis**. This perspective, rooted in game-theoretic probability, provides the deepest intuition for why e-values behave as they do [see Section 1.5 in @ramdas2024hypothesis].
+
+Consider two parties:
+
+- **Forecaster** believes the null hypothesis $P$ is true.
+- **Skeptic** believes the alternative $Q$ is more accurate.
+
+Forecaster offers a contract: Skeptic pays \$1 upfront, and after observing data $\omega$, Forecaster pays Skeptic $E(\omega)$ dollars, where $E$ is some agreed-upon nonnegative function of the data. When would Forecaster agree to this contract? Precisely when $\mathbb{E}_P[E] \leq 1$, because then Forecaster expects not to lose money. In other words: $E$ must be an e-variable.
+
+Meanwhile, Skeptic will only take the bet if they expect to profit under $Q$, meaning $\mathbb{E}_Q[E] > 1$. The realised e-value $E(\omega)$ is the **betting score**: it tells us how much Skeptic's wealth has multiplied.
+
+**P-values also have a betting interpretation, but a flawed one.** For a p-variable $U$ and any threshold $r \in (0,1]$, the quantity $\mathbf{1}\{U \leq r\}/r$ is an e-variable. But the realised p-value equals the *smallest* $r$ at which Skeptic would have profited, the best bet *in hindsight*. An e-value, by contrast, is a single pre-committed bet. This is why $1/p$ for a p-value $p$ overstates the evidence: it involves "double-dipping" by choosing the best bet after seeing the data.
+
+## First example: the Bernoulli likelihood ratio {#sec-lr-bernoulli}
+
+The most natural source of e-values is the **likelihood ratio**. Suppose we test a simple null $P$ against a simple alternative $Q$, with $Q \ll P$. Then
+$$
+E = \frac{dQ}{dP}(X)
+$$
+is an e-variable for $P$, because
+$$
+\mathbb{E}_P[E]
+= \mathbb{E}_P\!\left[\frac{dQ}{dP}(X)\right]
+= \int \frac{q(x)}{p(x)} p(x)\, dx
+= 1.
+$$
+
+In fact, for a simple null, exactness is equivalent to admissibility, and every exact e-variable equals a likelihood ratio $dS/dP$, $P$-almost surely, for some distribution $S \ll P$ [@ramdas2024hypothesis, Proposition 2.12].
+
+To make this concrete, consider testing $P = \text{Bernoulli}(p_0)$ against $Q = \text{Bernoulli}(q)$ with $q > p_0$, based on $n$ iid observations. Write $S_n = \sum_{i=1}^n X_i$ for the number of successes. The likelihood ratio e-variable is [@ramdas2024hypothesis, Equation 1.5]
+$$
+E_n
+=
+\left(\frac{q}{p_0}\right)^{S_n}
+\left(\frac{1-q}{1-p_0}\right)^{n - S_n}.
+$$
+
+We extend Example 1.4 from @ramdas2024hypothesis. A scientist observes the dataset
+$$
+(1,1,0,1,1,1,1,1)
+$$
+and tests $H_0: p = 1/2$. We calculate the e-value for several choices of the alternative $q$, including the extreme case $q = 1$.
+
+```{r}
+#| label: bernoulli-evalue-small
+x <- c(1, 1, 0, 1, 1, 1, 1, 1)
+n <- length(x)
+s <- sum(x)
+p0 <- 0.5
+
+q_values <- c(0.6, 0.7, 0.8, 0.9, 1.0)
+e_values <- sapply(q_values, function(q) {
+  (q / p0)^s * ((1 - q) / (1 - p0))^(n - s)
+})
+
+q_mle <- s / n
+e_mle <- (q_mle / p0)^s *
+  ((1 - q_mle) / (1 - p0))^(n - s)
+
+data.frame(
+  q = q_values,
+  e_value = round(e_values, 2)
+)
+```
+The e-value depends on the choice of the alternative $q$, but it is a valid e-variable regardless.
+
+Notice two important behaviours here. First, if we choose $q = 1$, the e-value drops to 0. This makes intuitive sense: an alternative with $q = 1$ asserts that a failure is strictly impossible. Since the observed dataset contains a 0, that alternative is falsified, and the e-value reflects this: Skeptic loses their entire \$1 stake.
+
+Second, even the best pre-specified alternative in our grid does not produce enough evidence to reject at $\alpha = 0.05$. Among the grid values, $q = 0.9$ gives the largest e-value, about `r round(max(e_values), 2)`. Treating $q$ as a free parameter, the function $q \mapsto E(q; \mathbf{x})$ is maximised at the maximum-likelihood value $q = `r q_mle`$, where it takes the value `r round(e_mle, 2)`. This is the largest e-value any pre-specified alternative in $(0, 1)$ could have produced for this dataset, which remains below the Markov threshold $1/\alpha = 20$. An important caveat: a practitioner who *chooses* $q$ after seeing the data would be using the data twice, and the resulting statistic would not be a valid e-variable. The proper sequential analogue, which uses only *past* data to choose the next bet, is the plug-in strategy introduced in @sec-composite.
+
+To see how e-values accumulate evidence multiplicatively, consider a slightly larger dataset with the same qualitative pattern: 13 successes in 16 trials.
+
+```{r}
+#| label: bernoulli-evalue-large
+n_large <- 16
+s_large <- 13
+p0 <- 0.5
+
+q_values_large <- c(0.6, 0.7, 0.8, 0.9)
+e_values_large <- sapply(q_values_large, function(q) {
+  (q / p0)^s_large * ((1 - q) / (1 - p0))^(n_large - s_large)
+})
+
+data.frame(
+  q = q_values_large,
+  e_value = round(e_values_large, 2)
+)
+```
+
+With this larger sample, the evidence against the null compounds multiplicatively. If the scientist had pre-specified an alternative of $q = 0.8$, the resulting e-value is `r round(e_values_large[q_values_large == 0.8], 2)`. Because this exceeds $20$, we can now reject the null hypothesis $H_0: p = 1/2$ at level $\alpha = 0.05$.
+
+**Unknown sampling schemes and stopping rules.** A useful property of the pre-specified likelihood-ratio process in this example is that its validity is preserved under a broad range of stopping rules, even though the appropriate classical p-value depends on the sampling scheme.
+
+To see why this matters, consider the dataset from the previous section: 7 successes and 1 failure in 8 coin tosses. Suppose we do not know whether these data were collected via design (a) "collect exactly 8 observations" or design (b) "collect until 5 consecutive heads." Notice that our specific dataset, (1, 1, 0, 1, 1, 1, 1, 1), triggers the stopping condition for both designs exactly on the 8th toss. The physical data sitting on the desk is identical in both scenarios.
+
+Under design (b), the sample size is *random*: the experimenter keeps flipping until a run of 5 consecutive heads appears, which could happen at flip 5 (if the first five are all heads) or much later. The p-value under this design is therefore $P_0(\tau \leq 8)$, the probability that the stopping time $\tau$, the first time a run of 5 consecutive heads is completed, occurs at or before the 8th flip. Because there are only $2^8=256$ possible sequences of eight tosses, this probability can be computed exactly.
+
+```{r}
+#| label: bernoulli-sampling
+# P-value under design (a): fixed sample size n = 8
+p_fixed <- pbinom(s - 1, size = n, prob = p0, lower.tail = FALSE)
+
+# P-value under design (b): exact enumeration of all 2^8 sequences.
+sequences <- as.matrix(
+  do.call(expand.grid, rep(list(c(0L, 1L)), 8L))
+)
+
+has_run_of_five <- apply(sequences, 1L, function(z) {
+  runs <- rle(z)
+  any(runs$values == 1L & runs$lengths >= 5L)
+})
+
+stopifnot(sum(has_run_of_five) == 20L)
+p_sequential <- mean(has_run_of_five)
+
+# E-value with q = 0.7 (identical for both designs)
+q <- 0.7
+e_val <- (q / p0)^s * ((1 - q) / (1 - p0))^(n - s)
+
+cat("Design (a) fixed n=8:          p-value =", round(p_fixed, 4), "\n")
+cat("Design (b) stop at 5 in a row: p-value =", round(p_sequential, 4), "\n")
+cat("E-value (q=0.7):                       ", round(e_val, 4),
+    "(same for both)\n")
+```
+
+Under the fixed-sample design, the appropriate p-value is below $0.05$, whereas under the stopping-rule design it is above $0.05$. A scientist who receives only the observations cannot determine which of these design-specific p-values applies. By contrast, the pre-specified likelihood-ratio process yields the same realised e-value for the same observed sequence and remains valid under either stopping description because it is an e-process, as developed in @sec-eprocesses. This conclusion assumes that the observations are retained from the beginning. It does not cover cherry-picking, deleting early unfavourable observations, or reporting the best of several batches.
+
+## Second example: the Gaussian likelihood ratio {#sec-lr-gaussian}
+
+Following the example in Section 1.6 of @ramdas2024hypothesis, test $P = \mathrm{N}(0, 1)$ against $Q = \mathrm{N}(\mu, 1)$ with $\mu > 0$, based on $n$ iid observations $X_1, \dots, X_n$. Let $S_n = \sum_{i=1}^n X_i$. The likelihood ratio for a single observation $X_i$ is
+$$\frac{q(X_i)}{p(X_i)} = \frac{\phi(X_i - \mu)}{\phi(X_i)} = \frac{\exp\!\left(-\tfrac{1}{2}(X_i - \mu)^2\right)}{\exp\!\left(-\tfrac{1}{2}X_i^2\right)} = \exp\!\left(\mu X_i - \frac{\mu^2}{2}\right),$$
+where $\phi$ denotes the standard normal density. Taking the product over all $n$ observations gives the likelihood-ratio e-variable [@ramdas2024hypothesis, Equation 1.1]
+$$
+E_n
+=
+\prod_{i=1}^n \exp\!\left(\mu X_i - \frac{\mu^2}{2}\right)
+=
+\exp\!\left(\mu S_n - \frac{n\mu^2}{2}\right).
+$$
+
+Setting $Z = S_n / \sqrt{n}$ and $\delta = \mu\sqrt{n}$ gives the equivalent form
+$$
+E_n = \exp(\delta Z - \delta^2/2)
+$$
+[@ramdas2024hypothesis, Equation 1.2], where $Z \sim \mathrm{N}(0,1)$ under the null. The classical one-sided p-value is $P_n = 1 - \Phi(Z)$.
+
+Both are functions of the same sufficient statistic $Z$, but they quantify evidence differently. We plot them side by side.
+
+```{r}
+#| label: fig-gaussian-ep
+#| fig-pos: "H"
+#| echo: false
+#| warning: false
+#| fig-cap: "E-values and p-values as functions of the test statistic $Z$ for the one-sided Gaussian test. Dashed lines show the rejection thresholds at $\\alpha = 0.05$."
+#| fig-width: 8
+#| fig-height: 4
+z_grid <- seq(-1, 5, length.out = 500)
+delta_values <- c(0.5, 1, 2, 3)
+
+# E-value curves for different delta
+df_e <- do.call(rbind, lapply(delta_values, function(delta) {
+  data.frame(z = z_grid,
+             value = exp(delta * z_grid - delta^2 / 2),
+             delta = paste0("delta = ", delta))
+}))
+
+p1 <- ggplot(df_e, aes(x = z, y = value, color = delta)) +
+  geom_line(linewidth = 0.7) +
+  geom_hline(yintercept = 20, linetype = "dashed", color = "grey40") +
+  annotate("text", x = -0.5, y = 30, label = "1/alpha = 20", size = 3,
+           color = "grey40") +
+  scale_y_log10(limits = c(0.01, 1e4)) +
+  labs(x = "Z", y = "E-value (log scale)", color = NULL,
+       title = "E-value") +
+  theme(legend.position = "bottom")
+
+# P-value curve (does not depend on delta)
+df_p <- data.frame(z = z_grid, value = 1 - pnorm(z_grid))
+
+p2 <- ggplot(df_p, aes(x = z, y = value)) +
+  geom_line(linewidth = 0.7, color = "steelblue") +
+  geom_hline(yintercept = 0.05, linetype = "dashed", color = "grey40") +
+  annotate("text", x = 4, y = 0.08, label = "alpha = 0.05", size = 3,
+           color = "grey40") +
+  scale_y_log10(limits = c(1e-6, 1)) +
+  labs(x = "Z", y = "P-value (log scale)", title = "P-value") +
+  theme(legend.position = "bottom")
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+```
+
+@fig-gaussian-ep shows the two evidence scales as functions of the same statistic. Two things stand out. First, the p-value is a single curve and does not depend on the alternative, while the e-value depends on our choice of $\delta$. Second, the e-value threshold for rejection ($E \geq 20$ at $\alpha = 0.05$) requires a larger $Z$ than the p-value threshold ($Z \geq 1.645$). This is the conservatism of Markov's inequality discussed in @prp-markov.
+
+
+## Combining e-values {#sec-combining}
+
+One of the most practically important properties of e-values is how cleanly they combine. The following facts follow immediately from the definition.
+
+::: {#prp-combining}
+## Combination rules (parts (iii) and (iv) of Fact 1.3 in @ramdas2024hypothesis)
+Let $E_1, \dots, E_K$ be e-variables for $\mathcal{P}$. Parts (i) and (ii) of Fact 1.3 construct p-variables from cumulative distribution functions, while parts (v) and (vi) give monotonicity properties. We state here only the two e-variable combination rules in parts (iii) and (iv).
+
+(iii) Their **arithmetic mean** $\bar{E} = \frac{1}{K}\sum_{k=1}^K E_k$ is an e-variable for $\mathcal{P}$ (under arbitrary dependence).
+
+(iv) If $E_1, \dots, E_K$ are **independent** under each $P \in \mathcal{P}$, then their **product** $\prod_{k=1}^K E_k$ is an e-variable for $\mathcal{P}$.
+:::
+
+Both facts follow from linearity of expectation (for the average) and the factorisation of expectations for independent random variables (for the product).
+
+These e-variable combination rules are unusually direct. Dependent p-values can also be merged, but not by taking their unadjusted arithmetic mean in general. Valid p-merging requires a dedicated construction and may involve conservatism [@ramdas2024hypothesis, Chapter 12]. For e-variables, the arithmetic mean itself is valid under arbitrary dependence.
+
+**Combining e-values in R.** We demonstrate both rules. Suppose $K = 5$ independent labs each collect $n = 20$ observations from $\mathrm{N}(\theta^\dagger, 1)$ and test $H_0: \theta = 0$ vs $H_1: \theta = 0.3$ using the likelihood ratio.
+
+```{r}
+#| label: combining-evalues
+mu <- 0.3          # alternative used in e-value construction
+theta_true <- 0.3  # true data-generating parameter
+n <- 20
+K <- 5
+
+# Simulate K independent experiments
+set.seed(123)
+e_vals <- sapply(seq_len(K), function(k) {
+  x_k <- rnorm(n, mean = theta_true, sd = 1)
+  exp(mu * sum(x_k) - n * mu^2 / 2)
+})
+
+cat("Individual e-values:", paste(sprintf("%.2f", e_vals), collapse = ", "), "\n")
+cat("Arithmetic mean:    ", sprintf("%.2f", mean(e_vals)), "\n")
+cat("Product:            ", sprintf("%.2f", prod(e_vals)), "\n")
+```
+The individual e-values range from `r sprintf("%.2f", min(e_vals))` to `r sprintf("%.2f", max(e_vals))`.
+
+* The **average** gives a combined e-value of `r round(mean(e_vals), 1)`, and requires no independence assumption: it is a valid e-variable whenever each marginal one is.
+* Because the experiments are independent, their e-values may also be multiplied. The product above `r if (prod(e_vals) >= 20) "crosses" else "does not cross"` the level-$0.05$ Markov threshold of $20$.
+
+```{r}
+#| label: combining-null-setup
+#| include: false
+# Simulation size and figure caption are defined here so that the number of
+# repetitions is stated in exactly one place.
+n_rep <- 10000
+
+cap_combining_null <- paste0(
+  "Null distributions of averaged and multiplied e-values across ",
+  format(n_rep, big.mark = ","), " repetitions of ", K,
+  " independent experiments. Both have expectation one, but the product is ",
+  "far more right-skewed."
+)
+```
+
+To illustrate the behaviour of these combination rules under the null, we simulate `r format(n_rep, big.mark = ",")` repetitions in which $H_0$ is true ($\theta^\dagger = 0$).
+
+```{r}
+#| label: fig-combining-null
+#| echo: false
+#| results: hide
+#| fig-cap: !expr cap_combining_null
+#| fig-width: 7
+#| fig-height: 4
+set.seed(2026)
+
+results <- t(replicate(n_rep, {
+  e_null <- sapply(seq_len(K), function(k) {
+    x_k <- rnorm(n, mean = 0, sd = 1)
+    exp(mu * sum(x_k) - n * mu^2 / 2)
+  })
+  c(avg = mean(e_null), prod = prod(e_null))
+}))
+
+# Exact null moments for the Gaussian likelihood-ratio construction.
+single_var <- exp(n * mu^2) - 1
+mcse_avg_mean <- sqrt(single_var / (K * n_rep))
+mcse_prod_mean <- sqrt((exp(K * n * mu^2) - 1) / n_rep)
+prod_median <- exp(-K * n * mu^2 / 2)
+prod_sd <- sqrt(exp(K * n * mu^2) - 1)
+
+mean_avg_hat <- mean(results[, "avg"])
+mean_prod_hat <- mean(results[, "prod"])
+cross_avg_hat <- mean(results[, "avg"] >= 20)
+cross_prod_hat <- mean(results[, "prod"] >= 20)
+
+df_null <- data.frame(
+  value = c(results[, "avg"], results[, "prod"]),
+  method = rep(c("Average", "Product"), each = n_rep)
+)
+
+ggplot(df_null, aes(x = value, fill = method)) +
+  geom_histogram(bins = 60, alpha = 0.6, position = "identity") +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  scale_x_log10() +
+  facet_wrap(~method, scales = "free_y") +
+  labs(x = "Combined e-value (log scale)", y = "Count", fill = NULL) +
+  theme(legend.position = "none")
+```
+
+@fig-combining-null illustrates two very different null distributions. In the betting language of @sec-betting, no valid strategy can expect to profit when the null holds, and both combined e-variables here have exact expectation one. The simulated means are `r sprintf("%.3f", mean_avg_hat)` for the average and `r sprintf("%.3f", mean_prod_hat)` for the product. The corresponding proportions exceeding the threshold $20$ are `r sprintf("%.4f", cross_avg_hat)` and `r sprintf("%.4f", cross_prod_hat)`, respectively.
+
+That guarantee constrains the expectation alone: it does not require the realised values, or even their Monte Carlo sample means, to be concentrated near one. The arithmetic mean is comparatively stable. The product is highly right-skewed: in this setting its theoretical median is `r round(prod_median, 3)` and its standard deviation is approximately `r round(prod_sd, 1)`, even though its expectation is one. The Monte Carlo standard error of the estimated product mean across `r format(n_rep, big.mark = ",")` repetitions is therefore approximately `r sprintf("%.2f", mcse_prod_mean)`, compared with `r sprintf("%.3f", mcse_avg_mean)` for the averaged e-variable.
+
+The simulation illustrates the theoretical expectation and threshold-crossing guarantees but does not verify them. Those guarantees follow from @prp-combining and @prp-markov. The empirical crossing proportions are Monte Carlo summaries to be read against the theoretical upper bound of $0.05$, and both fall far below it, a concrete instance of the looseness of the Markov threshold discussed in @sec-markov.
+
+
+## Calibrators: converting between p-values and e-values {#sec-calibrators}
+
+Since both e-values and p-values are commonly used in practice, it is important to understand how to convert between them.
+
+### E-to-p calibration
+
+By @prp-markov, $g(e) = \min(1/e, 1)$ converts any e-value into a p-value. This is the **unique admissible deterministic e-to-p calibrator** [@ramdas2024hypothesis, Proposition 2.4]. In other words, there is essentially only one sensible way to go from e-values to p-values: inversion.
+
+### P-to-e calibration
+
+Going the other direction is richer. A **p-to-e calibrator** is a decreasing function $f: [0, \infty) \to [0, \infty]$ with $f = 0$ on $(1, \infty)$ such that $f(U)$ is an e-variable whenever $U$ is a p-variable. The characterisation is elegant: $f$ is a p-to-e calibrator if and only if $\int_0^1 f(p) \, dp \leq 1$ [@ramdas2024hypothesis, Proposition 2.5].
+
+Some useful admissible calibrators include:
+
+- **Power calibrator:** $f(p) = \kappa p^{\kappa - 1}$ for $\kappa \in (0, 1)$. For small $\kappa$, its dependence on $p$ approaches the $p^{-1}$ shape, while the prefactor $\kappa$ keeps the integral equal to one [@ramdas2024hypothesis, Equation 2.1].
+- **Negative log:** $f(p) = -\log p$. Simple and useful, but penalises small p-values less aggressively. [@ramdas2024hypothesis, Equation 2.5]
+- **Mixture calibrator:** $f(p) = \frac{1 - p + p\log p}{p(\log p)^2}$. This is the mixture of all power calibrators [@ramdas2024hypothesis, Equation 2.2].
+
+An important lesson is that **round-tripping can lose evidence**. A p-to-e-to-p round trip cannot improve the p-value and may make it substantially larger. We illustrate this with a concrete computation.
+
+### Calibrators in R {#sec-calibrators-r}
+
+We start from z-test p-values and convert them to e-values via several calibrators, then convert back.
+
+```{r}
+#| label: fig-calibrators
+#| warning: false
+#| fig-cap: "Three p-to-e calibrators applied to p-values from a standard z-test, with the reciprocal $1/p$ shown for comparison."
+#| fig-width: 7
+#| fig-height: 4.5
+
+# Define calibrators on [0, infinity), with value zero above one.
+f_power <- function(p, kappa = 0.5) {
+  stopifnot(all(p >= 0), kappa > 0, kappa < 1)
+  ifelse(p <= 1, kappa * p^(kappa - 1), 0)
+}
+
+f_log <- function(p) {
+  stopifnot(all(p >= 0))
+  ifelse(p <= 1, -log(p), 0)
+}
+
+f_mixture <- function(p) {
+  stopifnot(all(p >= 0))
+
+  out <- numeric(length(p))
+  out[p == 0] <- Inf
+
+  inside <- p > 0 & p < 1
+  out[inside] <-
+    (1 - p[inside] + p[inside] * log(p[inside])) /
+    (p[inside] * log(p[inside])^2)
+
+  out[p == 1] <- 1 / 2
+  out[p > 1] <- 0
+  out
+}
+
+p_grid <- seq(0.001, 0.999, length.out = 500)
+
+df_cal <- data.frame(
+  p = rep(p_grid, 4),
+  e = c(
+    f_power(p_grid, 0.5),
+    f_log(p_grid),
+    f_mixture(p_grid),
+    1 / p_grid
+  ),
+  calibrator = rep(
+    c(
+      "Power (kappa=0.5)",
+      "Negative log",
+      "Mixture",
+      "1/p (not a calibrator)"
+    ),
+    each = length(p_grid)
+  )
+)
+
+ggplot(df_cal, aes(x = p, y = e, color = calibrator, linetype = calibrator)) +
+  geom_line(linewidth = 0.7) +
+  scale_y_log10(limits = c(0.1, 1000)) +
+  scale_linetype_manual(
+    values = c(
+      "Power (kappa=0.5)" = "solid",
+      "Negative log" = "solid",
+      "Mixture" = "solid",
+      "1/p (not a calibrator)" = "dashed"
+    )
+  ) +
+  labs(x = "p-value", y = "e-value (log scale)",
+       color = NULL, linetype = NULL) +
+  theme(legend.position = "bottom")
+```
+
+Every valid calibrator satisfies $f(p) \leq 1/p$ [@ramdas2024hypothesis, Section 2.3]. The argument is one line: if $f(p_1) > 1/p_1$ for some $p_1 \in (0,1]$, then, because $f$ is decreasing,
+$$
+\int_0^1 f(p) \, dp \;\geq\; \int_0^{p_1} f(p) \, dp \;\geq\; p_1 f(p_1) \;>\; 1,
+$$
+contradicting the integrability condition. The admissible calibrators displayed in @fig-calibrators lie strictly below this bound. The function $1/p$ itself is not a p-to-e calibrator: its integral diverges,
+$$
+\int_0^1 p^{-1} \, dp = \infty,
+$$
+so it fails the defining integrability condition. Admissibility is the sharper optimality notion within the class of valid calibrators. Proposition 2.5 of @ramdas2024hypothesis states that a calibrator is admissible if and only if it is upper semicontinuous, satisfies $f(0)=\infty$, and has
+$$
+\int_0^1 f(p)\,dp=1.
+$$
+Integral equality alone is therefore not sufficient.
+
+```{r}
+#| label: round-trip
+# Round-trip loss: p -> e -> p'
+p_start <- 0.01
+
+cat("Starting p-value:", p_start, "\n\n")
+for (cal_name in c("Power (kappa=0.5)", "Negative log", "Mixture")) {
+  e <- switch(
+    cal_name,
+    "Power (kappa=0.5)" = f_power(p_start, 0.5),
+    "Negative log" = f_log(p_start),
+    "Mixture" = f_mixture(p_start)
+  )
+  p_back <- min(1 / e, 1)  # e-to-p calibration
+
+  # Print with consistent formatting
+  cat(sprintf("%-18s : p -> %6.2f -> p' = %.4f\n", cal_name, e, p_back))
+}
+```
+
+The round-trip loss is substantial. For each of the smooth calibrators used here, the recovered p-value $p'$ is strictly larger than the starting value. More generally, a p-to-e-to-p round trip cannot improve the p-value and may lose substantial information.
+
+## E-power and log-optimality {#sec-epower}
+
+While @sec-markov tells us how to *use* e-values for testing, it says nothing about which e-variable to choose. @ramdas2024hypothesis develop the theory of efficiency for e-values (Definition 3.11), centred on a notion called **e-power**.
+
+::: {#def-epower}
+## E-power [adapted from @ramdas2024hypothesis, Definition 3.11]
+The **e-power** of an e-variable $E$ against an alternative $Q$ is
+$$
+\Lambda_Q(E) = \mathbb{E}_Q[\log E],
+$$
+provided that the expectation is well-defined. An e-variable has **positive e-power** against $\mathcal{Q}$ if $\mathbb{E}_Q[\log E] > 0$ for each $Q \in \mathcal{Q}$.
+:::
+
+### Why the logarithm?
+
+The choice of the logarithm is not arbitrary. It is justified by three converging arguments:
+
+1. **Product structure.** In the simplest setting, suppose we observe iid data and use the same construction at each step, producing iid e-variables $E_1, E_2, \dots$ under the alternative $Q$. Their product $M_n = \prod_{i=1}^n E_i$ accumulates evidence multiplicatively. Provided that $\mathbb{E}_Q[|\log E_1|] < \infty$, the strong law of large numbers gives $\frac{1}{n}\log M_n \to \mathbb{E}_Q[\log E_1]$ almost surely. The e-power is therefore the asymptotic growth rate of the accumulated evidence. This convergence extends to adaptive, non-iid settings under weaker conditions via e-processes; see Chapter 7 of @ramdas2024hypothesis.
+
+2. **Kelly criterion.** In the betting interpretation, a gambler who repeatedly bets at fair odds maximises long-run wealth growth by maximising expected log wealth [@kelly1956new]. The e-power is the expected log wealth from a single round.
+
+3. **Axiomatic derivation.** On the class $\mathcal{X}$ of nonnegative random variables that are bounded above and away from zero, and for an atomless alternative distribution $Q$, @ramdas2024hypothesis show (Theorem 3.28) that any ranking satisfying two natural axioms, *homogeneity* (scaling the e-variable by a constant preserves the ranking) and *asymptotic consistency* (if a product process achieves asymptotic power 1, so does any process ranked higher), must be a strictly increasing transform of $\mathbb{E}_Q[\log E]$.
+
+
+### The log-optimal e-variable
+
+For testing a simple null $\{P\}$ against a simple alternative $\{Q\}$ with $Q \ll P$, which e-variable should we choose? The answer is given by the following result (Theorem 3.20 in @ramdas2024hypothesis):
+
+::: {#thm-logoptimal}
+## Log-optimality of the likelihood ratio
+For testing $P$ against $Q$ with $Q \ll P$, the $P$-almost surely unique log-optimal e-variable is $E^* = dQ/dP$. Its e-power equals the Kullback--Leibler divergence, which may be infinite:
+$$
+\mathbb{E}_Q[\log E^*]
+=
+\mathrm{KL}(Q \| P)
+=
+\int q(x) \log\frac{q(x)}{p(x)} \, dx.
+$$
+:::
+
+This result is the **e-value analogue of the Neyman--Pearson lemma**. Where Neyman--Pearson tells us that the most powerful level-$\alpha$ test thresholds the likelihood ratio, @thm-logoptimal tells us that the likelihood ratio itself is the optimal e-variable in the sense of maximising e-power.
+
+### E-power in R {#sec-epower-r}
+
+For the Gaussian example, the e-power of $E_n = \exp(\mu S_n - n\mu^2/2)$ under the true alternative $\theta^\dagger$ is $n(\mu \theta^\dagger - \mu^2/2)$, which is maximised at $\mu = \theta^\dagger$ with optimal value $n\theta^{\dagger 2}/2 = \mathrm{KL}(Q \| P)$ [@ramdas2024hypothesis, Example 3.13]. We illustrate this by simulation and compare the empirical curve with the theoretical expression.
+
+```{r}
+#| label: fig-epower
+#| warning: false
+#| fig-cap: "Empirical e-power (mean of $\\log E$) for different choices of the alternative $\\mu$ used to construct the e-value. The true parameter is $\\theta^\\dagger = 0.3$. The dashed vertical line marks the optimum."
+#| fig-width: 6
+#| fig-height: 4
+set.seed(2026)
+
+theta_true <- 0.3
+n <- 50
+mu_grid <- seq(0.05, 0.8, by = 0.025)
+n_rep_epower <- 5000
+
+# For each mu, simulate the e-power
+epower <- sapply(mu_grid, function(mu) {
+  log_e <- replicate(n_rep_epower, {
+    x <- rnorm(n, mean = theta_true, sd = 1)
+    mu * sum(x) - n * mu^2 / 2
+  })
+  mean(log_e)
+})
+
+# Theoretical curve: n * (mu * theta_true - mu^2 / 2)
+epower_theory <- n * (mu_grid * theta_true - mu_grid^2 / 2)
+
+df_ep <- data.frame(
+  mu = rep(mu_grid, 2),
+  epower = c(epower, epower_theory),
+  type = rep(c("Simulated", "Theoretical"), each = length(mu_grid))
+)
+
+ggplot(df_ep, aes(x = mu, y = epower, color = type, linetype = type)) +
+  geom_line(linewidth = 0.8) +
+  geom_vline(xintercept = theta_true, linetype = "dashed", color = "grey40") +
+  annotate("text", x = theta_true + 0.05, y = max(epower_theory) * 0.9,
+           label = expression(mu == theta[true] ~ "= 0.3"),
+           hjust = 0, size = 3) +
+  labs(x = expression(mu ~ "(alternative used in e-value)"),
+       y = "E-power (mean of log E)",
+       color = NULL, linetype = NULL) +
+  theme(legend.position = "bottom")
+```
+@fig-epower shows close agreement between the empirical and theoretical curves, with both maximised at $\mu = \theta^\dagger = 0.3$, as predicted by @thm-logoptimal. Using a moderately misspecified alternative, such as $\mu = 0.5$, still yields a valid e-variable with positive but lower e-power, so evidence accumulates more slowly. More severe misspecification is worse: at $\mu = 2\theta^\dagger = 0.6$ the e-power is exactly zero, and beyond that it turns negative, meaning the e-variable is expected to shrink under the alternative. A negative e-power does not invalidate the e-variable, which remains valid under the null, but it means that the bet loses wealth on average even when the alternative is true.
+
+
+## Composite hypotheses and adaptive strategies {#sec-composite}
+
+In practice, simple-vs-simple testing is rare. The alternative is usually composite: we know the null but not which specific alternative generated the data. In the betting language of @sec-betting, the Skeptic believes the coin is biased but does not know *how much*. Which bet should they place?
+
+Two general strategies address this: **hedging your bets upfront** (method of mixtures) or **learning as you go** (plug-in method). Both produce valid e-variables regardless of which specific alternative is true [@ramdas2024hypothesis, Section 3.7].
+
+### Method of mixtures: hedging your bets
+
+Suppose we test a fair coin ($H_0: p = 0.5$) and believe the true bias is somewhere in the range $q \in \{0.6, 0.7, 0.8\}$, but we do not know which. Rather than committing to a single alternative, we can **average** the likelihood ratio e-values across all candidates. If we assign equal weight to each, we compute
+$$E_n = \frac{1}{3}\left[E_n^{(0.6)} + E_n^{(0.7)} + E_n^{(0.8)}\right]$$
+where $E_n^{(q)}$ is the likelihood ratio e-value under alternative $q$. Because each $E_n^{(q)}$ has expectation at most 1 under the null, so does their average. The mixture is a valid e-variable no matter which $q$ is true.
+
+More generally, we can replace the discrete average with a continuous mixture using a probability measure $\nu$ over the set of alternatives $\mathcal{Q}$ [@ramdas2024hypothesis, Equation 3.7]:
+$$E_n = \int \prod_{i=1}^n \frac{q(X_i)}{p(X_i)} \, \nu(dq).$$
+This is always a valid e-variable. Under regularity and support conditions on $\nu$, it achieves asymptotic log-optimality: $\frac{1}{n}\mathbb{E}_{Q^n}[\log E_n] \to \mathrm{KL}(Q \| P)$ for any $Q \in \mathcal{Q}$ [@ramdas2024hypothesis, Equation 3.6]. The mixing distribution $\nu$ plays a role similar to a Bayesian prior, but validity does not depend on $\nu$ being "correct". Only asymptotic efficiency does.
+
+### Plug-in method: learning as you go
+
+Instead of hedging upfront, we can **adapt** our bet as data accumulates. The idea is simple: use the first $i - 1$ observations to estimate the alternative, then place our bet on observation $i$ using that estimate.
+
+Concretely, suppose we are testing a fair coin and have already seen 9 tosses with 7 heads. Our current best guess for the bias is $\hat{q}_9 = 7/9 \approx 0.78$. We use this as the alternative to construct the likelihood ratio for the 10th toss. Crucially, the estimate $\hat{q}_9$ does not use the 10th observation. It looks only backward, never forward.
+
+In general, let $\hat{Q}_{i-1}$ be an estimate of $Q$ based on $(X_1, \dots, X_{i-1})$, with density $\hat{q}_{i-1}$. The plug-in e-variable is [@ramdas2024hypothesis, Equation 3.8]
+$$
+E_n = \prod_{i=1}^n \frac{\hat{q}_{i-1}(X_i)}{p(X_i)}.
+$$
+Because each factor uses only past data to form its bet, the running product is a nonnegative martingale under $P$: at every step, the expected value of the next factor, given everything seen so far, equals 1 whenever $\hat{q}_{i-1}$ is a proper probability density, since
+$$
+\mathbb{E}_P\!\left[\frac{\hat{q}_{i-1}(X_i)}{p(X_i)} \,\Big|\, X_1, \dots, X_{i-1}\right]
+= \int \frac{\hat{q}_{i-1}(x)}{p(x)}\, p(x)\, dx
+= \int \hat{q}_{i-1}(x)\, dx
+= 1.
+$$
+If $\hat{q}_{i-1}$ is instead a sub-probability density, the conditional expectation is at most 1 and the running product is a supermartingale; the validity argument goes through in both cases [see the discussion preceding Example 1.5 in @ramdas2024hypothesis]. Common choices for $\hat{Q}_{i-1}$ include the MLE or posterior mean from the first $i - 1$ observations (where the initial $\hat{Q}_0$ is simply set to the null distribution or a neutral prior).
+
+### Adaptive strategies in R {#sec-composite-r}
+
+We implement several strategies from Example 1.5 in @ramdas2024hypothesis for testing $H_0: \theta = 0$ vs $H_1: \theta > 0$ with $\mathrm{N}(\theta, 1)$ data, where the true parameter is $\theta^\dagger = 0.3$.
+
+```{r}
+#| label: fig-adaptive
+#| fig-cap: "Sequential e-processes (log scale) for different strategies of choosing the alternative. The true parameter is $\\theta^\\dagger = 0.3$."
+#| fig-width: 7
+#| fig-height: 5
+theta_true <- 0.3
+n <- 500
+set.seed(42)
+x <- rnorm(n, mean = theta_true, sd = 1)
+
+# (i) Oracle: knows the true theta
+log_M_oracle <- cumsum(theta_true * x - theta_true^2 / 2)
+
+# (ii) Misspecified: uses theta = 0.1
+theta_mis <- 0.1
+log_M_mis <- cumsum(theta_mis * x - theta_mis^2 / 2)
+
+# (iii) Clipped MLE plug-in: theta_i is estimated from X_1,...,X_{i-1}
+# For the first observation we have no data, so we use theta = 0.1 as a
+# starting guess (following Ramdas & Wang). This means we still extract
+# some evidence from the very first data point, unlike initialising at 0.
+log_M_mle <- numeric(n)
+theta_init <- 0.1
+log_M_mle[1] <- theta_init * x[1] - theta_init^2 / 2
+for (i in 2:n) {
+  theta_hat <- max(mean(x[1:(i-1)]), 0.001)  # MLE, clipped to be positive
+  log_M_mle[i] <- log_M_mle[i-1] + theta_hat * x[i] - theta_hat^2 / 2
+}
+
+# (iv) Mixture over a grid of theta values
+theta_grid <- seq(0.01, 0.6, length.out = 30)
+log_LR_grid <- sapply(theta_grid, function(th) {
+  cumsum(th * x - th^2 / 2)
+})
+# Mixture: average the likelihood ratios on the original scale, then take log.
+# We use the log-sum-exp trick for numerical stability (see note below).
+log_M_mix <- apply(log_LR_grid, 1, function(row) {
+  max_val <- max(row)
+  max_val + log(mean(exp(row - max_val)))
+})
+
+df_strat <- data.frame(
+  t = rep(1:n, 4),
+  log_M = c(log_M_oracle, log_M_mis, log_M_mle, log_M_mix),
+  strategy = rep(c("(i) Oracle (theta=0.3)",
+                    "(ii) Misspecified (theta=0.1)",
+                    "(iii) Clipped MLE plug-in",
+                    "(iv) Mixture"), each = n)
+)
+
+ggplot(df_strat, aes(x = t, y = log_M, color = strategy)) +
+  geom_line(linewidth = 0.6) +
+  geom_hline(yintercept = log(20), linetype = "dashed", color = "grey40") +
+  annotate("text", x = 490, y = log(20) - 0.7,
+           label = "log(1/alpha) at alpha = 0.05",
+           hjust = 1, size = 3, color = "grey40") +
+  labs(x = "Sample size", y = "log(e-process)",
+       color = NULL) +
+  theme(legend.position = "bottom")
+```
+
+@fig-adaptive compares the four accumulated-evidence paths. In this run the oracle path, which knows $\theta^\dagger$, grows fastest, consistently with its maximal expected log-growth rate. The misspecified alternative grows more slowly but remains valid. The clipped MLE plug-in and mixture paths move towards the oracle benchmark in this run, consistently with the asymptotic results discussed in @sec-composite.
+
+A practical implementation note: when computing the mixture e-value, directly evaluating `mean(exp(log_LR))` will cause numerical overflow in R for large sample sizes, since individual log-likelihood ratios can easily exceed 700 (the limit of `exp()` in double precision). The log-sum-exp trick (subtracting the maximum before exponentiating and adding it back afterward) avoids this by keeping all intermediate values in a numerically safe range.
+
+
+## The cost of the Markov threshold: a fixed-sample power comparison {#sec-power-cost}
+
+A natural question: if we build a test from an e-value via Markov's inequality, how does its power compare to the optimal p-value test? [see @ramdas2024hypothesis, Section 1.2.2 for a detailed discussion of this trade-off]. What follows concerns a likelihood-ratio e-variable read through the universal threshold $1/\alpha$, not the e-variable formalism as such: any binary level-$\alpha$ test $\varphi$ can itself be written as the all-or-nothing e-variable $E = \varphi/\alpha$, which satisfies $\mathbb{E}_P[E] \leq 1$ and rejects exactly when $\varphi$ does, so it has identical power.
+
+For testing $P = \mathrm{N}(0,1)$ against $Q = \mathrm{N}(\mu, 1)$ at level $\alpha$:
+
+- The **z-test** rejects when $Z > z_\alpha$, where $z_\alpha = \Phi^{-1}(1-\alpha)$.
+- The **Markov test** rejects when $E_n = \exp(\delta Z - \delta^2/2) \geq 1/\alpha$, i.e., when $Z \geq \delta/2 + \log(1/\alpha)/\delta$.
+
+For this comparison, we grant the Markov test an oracle advantage in the growth-rate sense: at each true parameter $\theta$ we set $\mu = \theta$, the value that maximises the e-power of @sec-epower. The resulting curve therefore evaluates a different e-variable at each $\theta$, rather than tracing the power function of a single pre-specified procedure; the best single choice of $\mu$ is considered after the figure.
+```{r}
+#| label: fig-power
+#| fig-cap: "Rejection probabilities for the z-test and for the Markov-thresholded likelihood-ratio e-variable tuned to each true $\\theta$, at level $\\alpha = 0.05$ with $n = 30$ observations."
+#| fig-width: 6
+#| fig-height: 4
+alpha <- 0.05
+n <- 30
+theta_grid <- seq(0, 0.8, length.out = 200)
+
+# Z-test power: reject if Z > qnorm(1 - alpha)
+z_thresh <- qnorm(1 - alpha)
+power_z <- pnorm(z_thresh, mean = theta_grid * sqrt(n), lower.tail = FALSE)
+
+# Markov test power: reject if exp(delta*Z - delta^2/2) >= 1/alpha
+# i.e. Z >= delta/2 + log(1/alpha)/delta, with delta = mu*sqrt(n)
+# We use the oracle choice mu = theta for each theta
+power_markov <- sapply(theta_grid, function(th) {
+  delta <- th * sqrt(n)
+  if (delta == 0) return(0)  # oracle uses mu=0, so E=1 always; never rejects
+  e_thresh <- delta / 2 + log(1 / alpha) / delta
+  pnorm(e_thresh, mean = th * sqrt(n), lower.tail = FALSE)
+})
+
+df_power <- data.frame(
+  theta = rep(theta_grid, 2),
+  power = c(power_z, power_markov),
+  test = rep(c("Z-test (p-value)", "Markov test (oracle-tuned e-value)"),
+             each = length(theta_grid))
+)
+
+ggplot(df_power, aes(x = theta, y = power, color = test)) +
+  geom_line(linewidth = 0.8) +
+  geom_hline(yintercept = alpha, linetype = "dotted", color = "grey60") +
+  labs(x = expression(theta ~ "(true mean)"), y = "Power",
+       color = NULL) +
+  theme(legend.position = "bottom")
+```
+
+@fig-power shows that the z-test is uniformly more powerful for fixed-sample testing at $\theta > 0$, reflecting the conservatism of Markov's threshold. The point $\theta = 0$ should be interpreted separately: there the null is true, so the vertical axis represents type-I error rather than power. In this oracle comparison, the Markov test has type-I error $0$ because the oracle sets $\mu = 0$, which makes the e-variable equal to $1$ identically and hence prevents rejection. This should not be read as a general advantage of e-values: in a practical safe test, $\mu$ is fixed in advance, so the e-variable under $\theta = 0$ is a genuine random variable, and its type-I error is at most $\alpha$ rather than exactly zero (as illustrated in @fig-safe-z-fpr). The substantive trade-off is the power gap for $\theta > 0$, where the z-test rejects more often even when the Markov construction is given oracle knowledge of the true alternative.
+
+The oracle tuning $\mu = \theta$ is optimal for evidence growth, but not for fixed-horizon rejection. For a fixed $\delta$ the Markov rule rejects when $Z \geq \delta/2 + \log(1/\alpha)/\delta$, and this boundary is minimised at
+$$
+\delta_\star = \sqrt{2\log(1/\alpha)},
+$$
+where it takes the value $\delta_\star$ itself. At $\alpha = 0.05$ the smallest attainable boundary is therefore `r round(sqrt(2 * log(1 / alpha)), 3)`, against $z_\alpha =$ `r round(qnorm(1 - alpha), 3)` for the classical test, and the rejection probability of that best single choice under the null is `r round(pnorm(sqrt(2 * log(1 / alpha)), lower.tail = FALSE), 4)`. Even the best fixed $\mu$ therefore rejects less often than the z-test at every $\theta > 0$, so a fixed-sample gap remains that is attributable to the conservative Markov boundary alone. The gap displayed in @fig-power is at least as large, since its pointwise choice $\mu = \theta$ is optimal for e-power rather than for fixed-horizon rejection.
+
+However, this comparison is misleading in isolation. E-variable methods offer forms of flexibility that the oracle fixed-horizon comparison does not capture [see @ramdas2024hypothesis, Sections 1.2.1 and 4.1]:
+
+- **Optional stopping.** A valid e-process may be monitored continuously and evaluated at a data-dependent stopping time. Repeatedly recomputing an unadjusted fixed-horizon p-value does not retain the corresponding guarantee.
+- **Combination.** E-variables can be averaged under arbitrary dependence and multiplied under independence. P-values can also be combined, but require dedicated merging procedures.
+- **Post-hoc error levels.** A single e-variable generates a family of threshold tests that remains valid under a ratio-based post-hoc criterion, even when the reported error level is data-dependent.
+
+The final point is not ordinary type-I error control at a randomly chosen level. Formally, for every data-dependent $\widehat{\alpha} \in (0,1)$,
+$$
+\mathbb{E}_P\left[
+\frac{\mathbf{1}\{E \geq 1/\widehat{\alpha}\}}
+{\widehat{\alpha}}
+\right]
+\leq
+\mathbb{E}_P[E]
+\leq 1.
+$$
+This is the post-hoc validity criterion of @ramdas2024hypothesis, Definition 4.1 and Proposition 4.3; see also @grunwald2024beyond. These forms of flexibility are developed in the subsequent chapters.
+
+
+## Informal evidence grids {#sec-grids}
+
+Unlike p-values, which have conventional decision thresholds such as $0.05$ and $0.01$, there are no universally agreed evidential categories for e-values. Jeffreys' scale can nevertheless serve as a rough descriptive guide for e-values that arise naturally as likelihood ratios or as Bayes factors satisfying the e-variable bound [@ramdas2024hypothesis, Section 2.7, Table 2.19]. The categories in @tbl-grids are heuristic descriptions rather than testing thresholds and should not be applied mechanically to arbitrary e-values.
+
+| E-value range | Level of evidence |
+|:---:|:---|
+| $1$ to $\sqrt{10} \approx 3.16$ | Weak |
+| $\sqrt{10}$ to $10$ | Substantial |
+| $10$ to $10\sqrt{10} \approx 31.6$ | Strong |
+| $10\sqrt{10}$ to $100$ | Very strong |
+| $> 100$ | Decisive |
+
+: Informal evidence grid for e-values, adapted from Jeffreys' scale. {#tbl-grids}
+
+The categories in @tbl-grids lie on a logarithmic scale, in powers of $\sqrt{10}$, reflecting the multiplicative nature of e-values. The grid applies best to naturally arising evidence measures such as likelihood ratios, not to all-or-nothing e-variables of the form $\mathbf{1}\{U \leq \alpha\}/\alpha$. Values $E \leq 1$ indicate that the Skeptic did not increase their wealth and therefore provide no evidence against the null.
+
+## Summary of key takeaways {#sec-summary}
+
+The core messages from this chapter are:
+
+1. **E-variables measure evidence on a multiplicative scale**: an e-variable satisfies $\mathbb{E}_P[E] \leq 1$ under the null, and larger realised e-values indicate more evidence against it.
+2. **Markov's inequality gives instant tests**: reject when $E \geq 1/\alpha$. The conversion is universally valid, though often conservative.
+3. **E-variables combine cleanly**: arithmetic averages are valid under arbitrary dependence, while products are valid under independence and, more generally, under the conditional-validity construction developed later.
+4. **The likelihood ratio is the canonical e-variable**: it is log-optimal for simple hypotheses, with e-power equal to the KL divergence.
+5. **Flexibility can cost fixed-sample power**: e-processes support optional stopping, while e-variables also permit direct combination and post-hoc valid threshold families.
+6. **Calibrators connect the two worlds**: the only admissible deterministic e-to-p calibrator is $e \mapsto \min(1/e,1)$, while the class of p-to-e calibrators is rich.
+7. **Adaptive strategies handle composite alternatives**: when the true alternative is unknown, methods like continuous mixtures or sequential MLE plug-ins allow us to learn the alternative on the fly while maintaining rigorous validity under the null.
